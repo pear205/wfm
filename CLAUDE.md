@@ -45,6 +45,32 @@ const PRESET_SKILLS = {
 };
 ```
 
+## 레이아웃 템플릿 & 디자인 시스템
+> 자세한 내용은 `style.css` 상단 주석 참고
+
+### 빌딩 블록 (Building Blocks)
+| 블록 | 클래스 접두어 | 설명 |
+|------|-------------|------|
+| AppBar | `.hd-*` | 최상단 네비게이션 바 |
+| Toolbar | `.filter-bar-*` | 검색·필터·액션 바 |
+| KPIPanel / KPICard | `.kpi-panel`, `.kpi-card` | 지표 카드 모음 |
+| DataGrid | `.year-table .col-*` | 데이터 그리드 |
+| AssignCell | `.assign-cell`, `.assign-bars`, `.proj-bar` | 공수 투입 셀·바 |
+| MemberCell | `.member-cell` | 멤버 아이덴티티 블록 |
+| Drawer | `.drawer-*` | 우측 슬라이드 패널 |
+| Modal / FormModal | `.modal-*`, `.form-*` | 오버레이·폼 모달 |
+
+### 화면 템플릿 (View Templates)
+```
+GridView  ── 연도별·가용인력 등 그리드 화면
+  AppBar + Toolbar + KPIPanel + DataGrid
+
+MgmtView  ── 관리 화면 (멤버·프로젝트 CRUD)
+  AppBar + Drawer + FormModal
+```
+
+> **신규 화면 추가 시:** 위 블록을 조합하고, 화면 전용 요소만 새 접두어(예: `.report-*`)로 추가.
+
 ## ⚠️ 절대 수정 금지
 **`data.js`의 m1~m8 멤버 identity 필드 (name, role, color, skills)는 절대 변경하지 말 것.**
 실제 팀원 정보입니다. `start`/`end` 날짜 필드 추가는 허용.
