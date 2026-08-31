@@ -40,9 +40,12 @@ async function _sha256(str) {
 }
 
 function _checkAuth() {
-  if (sessionStorage.getItem('wfm_auth') === _AUTH_HASH) return Promise.resolve();
+  const overlay = document.getElementById('authOverlay');
+  if (sessionStorage.getItem('wfm_auth') === _AUTH_HASH) {
+    overlay.classList.add('hidden');
+    return Promise.resolve();
+  }
   return new Promise(resolve => {
-    const overlay = document.getElementById('authOverlay');
     const input   = document.getElementById('authInput');
     const btn     = document.getElementById('authBtn');
     const err     = document.getElementById('authError');
