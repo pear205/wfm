@@ -3,6 +3,19 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
 <link rel="stylesheet" href="style.css">
+
+<!-- Auth overlay -->
+<div class="auth-overlay" id="authOverlay">
+  <div class="auth-card">
+    <div class="auth-brand">WFM</div>
+    <div class="auth-title">투입 이력 현황</div>
+    <div class="auth-subtitle">비밀번호를 입력하세요</div>
+    <input type="password" id="authInput" class="auth-input" placeholder="••••••••" autocomplete="current-password">
+    <div class="auth-error" id="authError"></div>
+    <button class="auth-btn" id="authBtn">입장</button>
+  </div>
+</div>
+
 <!-- App -->
 <div id="app">
   <header id="header">
@@ -130,5 +143,6 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="data.js"></script>
 <script src="app.js"></script>

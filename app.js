@@ -31,6 +31,40 @@ const state = {
   _tmpSkills: [],
 };
 
+// ─── Auth ───
+const _AUTH_HASH = '1d91407a7a7121bb72adbbebedda55f193bb53c94f7d99f299c493dd0529fdb8';
+
+async function _sha256(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+function _checkAuth() {
+  if (sessionStorage.getItem('wfm_auth') === _AUTH_HASH) return Promise.resolve();
+  return new Promise(resolve => {
+    const overlay = document.getElementById('authOverlay');
+    const input   = document.getElementById('authInput');
+    const btn     = document.getElementById('authBtn');
+    const err     = document.getElementById('authError');
+    overlay.classList.remove('hidden');
+    input.focus();
+    async function attempt() {
+      const hash = await _sha256(input.value);
+      if (hash === _AUTH_HASH) {
+        sessionStorage.setItem('wfm_auth', _AUTH_HASH);
+        overlay.classList.add('hidden');
+        resolve();
+      } else {
+        err.textContent = '비밀번호가 올바르지 않습니다.';
+        input.value = '';
+        input.focus();
+      }
+    }
+    btn.onclick = attempt;
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') attempt(); });
+  });
+}
+
 // ─── 스킬 프리셋 (카테고리별 추천 스킬) ───
 const PRESET_SKILLS = {
   lang:  ['Java', 'Spring', 'Kotlin', 'Python', 'JavaScript', 'TypeScript', 'React', 'Vue', 'Flutter', 'CSS'],
@@ -1404,19 +1438,20 @@ document.getElementById('showMonthBg').addEventListener('change', function() {
 });
 
 // Project filter
-(function(){
+function _initProjFilter() {
   const sel = document.getElementById('projFilter');
+  while (sel.options.length > 1) sel.remove(1);
   DATA.projects.forEach(p => {
     const opt = document.createElement('option');
     opt.value = p.id; opt.textContent = p.name;
     sel.appendChild(opt);
   });
-  sel.addEventListener('change', function() {
-    state.projectFilter = this.value;
-    _updateFilterClear();
-    render();
-  });
-})();
+}
+document.getElementById('projFilter').addEventListener('change', function() {
+  state.projectFilter = this.value;
+  _updateFilterClear();
+  render();
+});
 
 // Annual sparkline tooltip
 (function(){
@@ -1562,9 +1597,10 @@ document.getElementById('drawerBody').addEventListener('click', e => {
   }
 });
 
-document.getElementById('btnReset').onclick = () => {
+document.getElementById('btnReset').onclick = async () => {
   if (!confirm('샘플 데이터로 초기화하시겠습니까? 현재 변경 내용이 모두 삭제됩니다.')) return;
-  DataAPI.reset();
+  await DataAPI.reset();
+  _initProjFilter();
   closeDrawer();
   render();
 };
@@ -1628,10 +1664,13 @@ document.getElementById('themeToggle').onclick = () => {
 };
 
 // ─── Init ───
-(function() {
+(async function() {
   try {
     const saved = localStorage.getItem('wfm_theme');
     if (saved === 'dark' || saved === 'light') _applyTheme(saved);
   } catch(e) {}
+  await _checkAuth();
+  await loadData();
+  _initProjFilter();
+  render();
 })();
-render();
