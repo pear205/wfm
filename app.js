@@ -284,14 +284,14 @@ function renderYearView() {
     const monthlyTotals = Array.from({length:12},(_,i)=>
       Math.round(getAssignments(mem.id,year,i+1).reduce((s,a)=>s+a.mm,0)*100)/100
     );
-    const annualAvail = Math.round((12 - monthlyTotals.reduce((s,v)=>s+v,0))*10)/10;
+    const annualAvail = Math.round((monthlyTotals.reduce((s,v)=>s+v,0) - 12)*10)/10;
     const spark = monthlyTotals.map(v=>{
       const pct = Math.min(v/1.0, 1.5);
       const h = Math.max(2, Math.round(pct*16));
       const col = v===0?'#F5A623': v>1.0?'#E85C4A': v>=1.0?'#4DB36A':'var(--accent)';
       return `<div class="annual-spark-bar" style="height:${h}px;background:${col}"></div>`;
     }).join('');
-    const numCol = annualAvail>0?'var(--text-p)':annualAvail<0?'#c62828':'#2e7d32';
+    const numCol = annualAvail>0?'#c62828':annualAvail<0?'var(--text-p)':'#2e7d32';
     const numLabel = annualAvail===0 ? 'FULL' : `${annualAvail>0?'+':''}${annualAvail.toFixed(1)}`;
     const overM = monthlyTotals.filter(v=>v>1.05).length;
     const underM = monthlyTotals.filter(v=>v>0&&v<0.98).length;
