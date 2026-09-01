@@ -31,36 +31,35 @@ const state = {
   _tmpSkills: [],
 };
 
-// ─── Auth ───
-const _AUTH_HASH = '1d91407a7a7121bb72adbbebedda55f193bb53c94f7d99f299c493dd0529fdb8';
-
-async function _sha256(str) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
-}
-
-function _checkAuth() {
+// ─── Auth (Supabase Auth) ───
+async function _checkAuth() {
   const overlay = document.getElementById('authOverlay');
-  if (sessionStorage.getItem('wfm_auth') === _AUTH_HASH) {
+  const { data: { session } } = await _sb.auth.getSession();
+  if (session) {
     overlay.classList.add('hidden');
-    return Promise.resolve();
+    return;
   }
   return new Promise(resolve => {
-    const input   = document.getElementById('authInput');
-    const btn     = document.getElementById('authBtn');
-    const err     = document.getElementById('authError');
+    const input = document.getElementById('authInput');
+    const btn   = document.getElementById('authBtn');
+    const err   = document.getElementById('authError');
     overlay.classList.remove('hidden');
     input.focus();
     async function attempt() {
-      const hash = await _sha256(input.value);
-      if (hash === _AUTH_HASH) {
-        sessionStorage.setItem('wfm_auth', _AUTH_HASH);
-        overlay.classList.add('hidden');
-        resolve();
-      } else {
+      btn.disabled = true;
+      err.textContent = '';
+      const { error } = await _sb.auth.signInWithPassword({
+        email: 'pear205@gmail.com',
+        password: input.value,
+      });
+      if (error) {
         err.textContent = '비밀번호가 올바르지 않습니다.';
         input.value = '';
         input.focus();
+        btn.disabled = false;
+      } else {
+        overlay.classList.add('hidden');
+        resolve();
       }
     }
     btn.onclick = attempt;
