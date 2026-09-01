@@ -1585,7 +1585,7 @@ document.getElementById('drawerBody').addEventListener('click', e => {
     confirmable(delM, () => {
       state.formMode = {type:'member', id: delM.dataset.delMember};
       deleteMemberConfirm();
-    }, { color: '#fff' });
+    }, { label: '삭제?', color: '#fff' });
     return;
   }
   const editP = e.target.closest('[data-edit-project]');
@@ -1595,7 +1595,7 @@ document.getElementById('drawerBody').addEventListener('click', e => {
     confirmable(delP, () => {
       state.formMode = {type:'project', id: delP.dataset.delProject};
       deleteProjectConfirm();
-    }, { color: '#fff' });
+    }, { label: '삭제?', color: '#fff' });
   }
 });
 
