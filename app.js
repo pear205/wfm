@@ -1862,19 +1862,148 @@ document.getElementById('themeToggle').onclick = () => {
 
 // ─── Export ───
 function _exportPng() {
-  const table = document.querySelector('.year-table');
-  if (!table || typeof html2canvas === 'undefined') return;
-  const btn = document.getElementById('exportBtn');
-  btn.textContent = '처리중...';
-  btn.disabled = true;
-  html2canvas(table, { scale: 2, useCORS: true, backgroundColor: getComputedStyle(document.body).getPropertyValue('--bg-app').trim() || '#ffffff' })
-    .then(canvas => {
-      const a = document.createElement('a');
-      a.download = `WFM_${state.year}.png`;
-      a.href = canvas.toDataURL('image/png');
-      a.click();
-    })
-    .finally(() => { btn.textContent = '↓ 내보내기'; btn.disabled = false; });
+  const isDark = document.documentElement.dataset.theme === 'dark' ||
+    (!document.documentElement.dataset.theme && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const C = isDark
+    ? { bg:'#1a1d21', bgAlt:'#22262c', bgSurf:'#2a2f38', border:'#2e3138', text:'#e8eaf0', textM:'#8b90a0', accent:'#5b8ef5' }
+    : { bg:'#f4f6fc', bgAlt:'#ffffff', bgSurf:'#ffffff', border:'#e0e3ec', text:'#1a1d21', textM:'#6b7280', accent:'#3d6feb' };
+
+  const year = state.year;
+  const members = DATA.members.filter(m => {
+    const ys = (typeof m.start === 'string' && m.start) ? parseInt(m.start.slice(0,4)) : null;
+    const ye = (typeof m.end   === 'string' && m.end)   ? parseInt(m.end.slice(0,4))   : null;
+    if (ys && year < ys) return false;
+    if (ye && year > ye) return false;
+    return true;
+  });
+
+  const SC = 2; // scale
+  const MH = 20, RH = 36, HH = 28; // month header, row height, header height
+  const CW = 170, MW = 54, AW = 52;  // member col, month col, avail col
+  const W = CW + MW*12 + AW;
+  const H = HH + members.length * RH + 1;
+
+  const canvas = document.createElement('canvas');
+  canvas.width  = W * SC;
+  canvas.height = H * SC;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(SC, SC);
+
+  // background
+  ctx.fillStyle = C.bgAlt;
+  ctx.fillRect(0, 0, W, H);
+
+  // header row
+  ctx.fillStyle = C.bgSurf;
+  ctx.fillRect(0, 0, W, HH);
+  ctx.strokeStyle = C.border;
+  ctx.lineWidth = 0.5;
+  ctx.beginPath(); ctx.moveTo(0, HH); ctx.lineTo(W, HH); ctx.stroke();
+
+  ctx.fillStyle = C.textM;
+  ctx.font = `600 10px "Noto Sans KR", sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const MONTHS_KR = ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
+  for (let m=0; m<12; m++) {
+    const x = CW + m*MW + MW/2;
+    ctx.fillText(MONTHS_KR[m], x, HH/2);
+  }
+  ctx.fillText('연간가용', CW + 12*MW + AW/2, HH/2);
+  ctx.fillStyle = C.text;
+  ctx.textAlign = 'left';
+  ctx.fillText('멤버', 12, HH/2);
+
+  // rows
+  members.forEach((mem, ri) => {
+    const ry = HH + ri * RH;
+    // row bg
+    ctx.fillStyle = ri%2===0 ? C.bgAlt : C.bg;
+    ctx.fillRect(0, ry, W, RH);
+    // bottom border
+    ctx.strokeStyle = C.border;
+    ctx.lineWidth = 0.5;
+    ctx.beginPath(); ctx.moveTo(0, ry+RH); ctx.lineTo(W, ry+RH); ctx.stroke();
+
+    // member avatar
+    ctx.fillStyle = mem.color;
+    ctx.beginPath();
+    ctx.arc(18, ry+RH/2, 11, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = `600 8px "Noto Sans KR", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText((mem.name||'').slice(0,2), 18, ry+RH/2+1);
+
+    // member name
+    ctx.fillStyle = C.text;
+    ctx.font = `600 12px "Noto Sans KR", sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.fillText(mem.name, 34, ry+RH/2-4);
+    ctx.fillStyle = C.textM;
+    ctx.font = `400 10px "Noto Sans KR", sans-serif`;
+    ctx.fillText(mem.role, 34, ry+RH/2+7);
+
+    // month col vertical borders
+    ctx.strokeStyle = C.border;
+    ctx.lineWidth = 0.5;
+    ctx.beginPath(); ctx.moveTo(CW, ry); ctx.lineTo(CW, ry+RH); ctx.stroke();
+
+    // month cells
+    let monthlyTotals = [];
+    for (let m=1; m<=12; m++) {
+      const cx = CW + (m-1)*MW;
+      // vertical separator
+      if (m>1) { ctx.beginPath(); ctx.moveTo(cx, ry); ctx.lineTo(cx, ry+RH); ctx.stroke(); }
+
+      const assigns = getAssignments(mem.id, year, m);
+      const total = Math.round(assigns.reduce((s,a)=>s+a.mm,0)*100)/100;
+      monthlyTotals.push(total);
+
+      if (assigns.length > 0) {
+        const barH = Math.max(4, Math.min(RH-6, Math.round((RH-6) / assigns.length)));
+        let by = ry+3;
+        assigns.forEach(a => {
+          const proj = DATA.projects.find(p=>p.id===a.projectId);
+          if (!proj) return;
+          const alpha = a.mm >= 1.0 ? 1.0 : a.mm >= 0.75 ? 0.78 : a.mm >= 0.5 ? 0.58 : 0.38;
+          const r=parseInt(proj.color.slice(1,3),16), g=parseInt(proj.color.slice(3,5),16), b=parseInt(proj.color.slice(5,7),16);
+          ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+          ctx.beginPath();
+          ctx.roundRect(cx+2, by, MW-4, barH-1, 2);
+          ctx.fill();
+          // mm label
+          if (barH >= 10) {
+            ctx.fillStyle = alpha > 0.6 ? '#fff' : C.text;
+            ctx.font = `700 9px "Noto Sans KR", sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.fillText(a.mm, cx+MW/2, by+barH/2);
+          }
+          by += barH;
+        });
+      }
+    }
+
+    // annual avail col
+    const ax = CW + 12*MW;
+    ctx.beginPath(); ctx.moveTo(ax, ry); ctx.lineTo(ax, ry+RH); ctx.stroke();
+    const annualAvail = Math.round((monthlyTotals.reduce((s,v)=>s+v,0)-12)*10)/10;
+    const numLabel = annualAvail===0 ? 'FULL' : `${annualAvail>0?'+':''}${annualAvail.toFixed(1)}`;
+    ctx.fillStyle = annualAvail>0 ? '#c62828' : annualAvail<0 ? C.accent : '#2e7d32';
+    ctx.font = `700 10px "Noto Sans KR", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(numLabel, ax+AW/2, ry+RH/2);
+  });
+
+  // outer border
+  ctx.strokeStyle = C.border;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(0, 0, W, H);
+
+  const a = document.createElement('a');
+  a.download = `WFM_${year}.png`;
+  a.href = canvas.toDataURL('image/png');
+  a.click();
 }
 
 function _exportPdf() {
