@@ -1860,6 +1860,71 @@ document.getElementById('themeToggle').onclick = () => {
   _applyTheme(state.theme === 'dark' ? 'light' : 'dark');
 };
 
+// ─── Export ───
+function _exportPng() {
+  const table = document.querySelector('.year-table');
+  if (!table || typeof html2canvas === 'undefined') return;
+  const btn = document.getElementById('exportBtn');
+  btn.textContent = '처리중...';
+  btn.disabled = true;
+  html2canvas(table, { scale: 2, useCORS: true, backgroundColor: getComputedStyle(document.body).getPropertyValue('--bg-app').trim() || '#ffffff' })
+    .then(canvas => {
+      const a = document.createElement('a');
+      a.download = `WFM_${state.year}.png`;
+      a.href = canvas.toDataURL('image/png');
+      a.click();
+    })
+    .finally(() => { btn.textContent = '↓ 내보내기'; btn.disabled = false; });
+}
+
+function _exportPdf() {
+  const table = document.querySelector('.year-table');
+  if (!table) return;
+  const isDark = document.documentElement.dataset.theme === 'dark' ||
+    (!document.documentElement.dataset.theme && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const bg = isDark ? '#1a1d21' : '#ffffff';
+  const fg = isDark ? '#e8eaf0' : '#1a1d21';
+  const border = isDark ? '#2e3138' : '#e0e3ec';
+  const html = [
+    '<!DOCTYPE html><html><head><meta charset="UTF-8">',
+    '<title>WFM ' + state.year + '년 투입 현황</title>',
+    '<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600&display=swap" rel="stylesheet">',
+    '<style>',
+    '*{box-sizing:border-box;margin:0;padding:0}',
+    'body{font-family:"Noto Sans KR",sans-serif;background:' + bg + ';color:' + fg + ';padding:16px}',
+    'h2{font-size:14px;font-weight:600;margin-bottom:10px}',
+    'table{border-collapse:collapse;width:100%;font-size:11px}',
+    'th,td{border:1px solid ' + border + ';padding:4px 6px;text-align:center;white-space:nowrap}',
+    'th{font-weight:600;background:' + (isDark ? '#22262c' : '#f4f6fc') + '}',
+    '.annual-spark,.annual-spark-bar{display:none}',
+    '.member-cell{text-align:left}',
+    '.assign-cell,.assign-bars,.proj-bar{display:block}',
+    '.proj-bar{padding:2px 4px;border-radius:3px;font-size:10px;margin-bottom:1px}',
+    '@page{size:A3 landscape;margin:12mm}',
+    '@media print{body{padding:0}}',
+    '</style></head><body>',
+    '<h2>WFM ' + state.year + '년 투입 현황</h2>',
+    table.outerHTML,
+    '<script>window.onload=function(){window.print();}<' + '/script>',
+    '</body></html>'
+  ].join('');
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, '_blank');
+  if (win) setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+const _exportDropdown = document.getElementById('exportDropdown');
+document.getElementById('exportBtn').onclick = e => {
+  e.stopPropagation();
+  _exportDropdown.classList.toggle('hidden');
+};
+document.getElementById('exportPng').onclick = () => { _exportDropdown.classList.add('hidden'); _exportPng(); };
+document.getElementById('exportPdf').onclick = () => { _exportDropdown.classList.add('hidden'); _exportPdf(); };
+document.addEventListener('click', e => {
+  if (!e.target.closest('#exportWrap')) _exportDropdown.classList.add('hidden');
+});
+
 // ─── Init ───
 (async function() {
   try {

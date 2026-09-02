@@ -56,6 +56,14 @@
     <select id="projFilter" class="filter-bar-select">
       <option value="">프로젝트 전체</option>
     </select>
+    <div class="filter-bar-sep"></div>
+    <div class="export-wrap" id="exportWrap">
+      <button class="export-btn" id="exportBtn">↓ 내보내기</button>
+      <div class="export-dropdown hidden" id="exportDropdown">
+        <button class="export-item" id="exportPng">PNG 이미지</button>
+        <button class="export-item" id="exportPdf">PDF 인쇄</button>
+      </div>
+    </div>
   </div>
 
   <div id="benchFilterBar" class="filter-bar hidden">
@@ -160,6 +168,7 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="data.js"></script>
 <script src="wisenm.js"></script>
