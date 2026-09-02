@@ -104,19 +104,23 @@ const PRESET_COLORS = [
 // ─── Row ↔ JS 변환 ───
 function _rowToMember(r) {
   return { id: r.id, name: r.name, role: r.role, color: r.color,
-           start: r.start_month || null, end: r.end_month || null, skills: r.skills || [] };
+           start: r.start_month || null, end: r.end_month || null, skills: r.skills || [],
+           sort_order: r.sort_order ?? 0 };
 }
 function _memberToRow(m) {
   return { id: m.id, name: m.name, role: m.role, color: m.color,
-           start_month: m.start || null, end_month: m.end || null, skills: m.skills || [] };
+           start_month: m.start || null, end_month: m.end || null, skills: m.skills || [],
+           sort_order: m.sort_order ?? 0 };
 }
 function _rowToProject(r) {
   return { id: r.id, name: r.name, client: r.client || '', color: r.color,
-           start: r.start_month || '', end: r.end_month || '', status: r.status, desc: r.description || '' };
+           start: r.start_month || '', end: r.end_month || '', status: r.status, desc: r.description || '',
+           sort_order: r.sort_order ?? 0 };
 }
 function _projectToRow(p) {
   return { id: p.id, name: p.name, client: p.client, color: p.color,
-           start_month: p.start, end_month: p.end, status: p.status, description: p.desc || '' };
+           start_month: p.start, end_month: p.end, status: p.status, description: p.desc || '',
+           sort_order: p.sort_order ?? 0 };
 }
 function _rowToAssignment(r) {
   return { memberId: r.member_id, projectId: r.project_id,
@@ -148,8 +152,8 @@ async function loadData() {
     if (mRes.error) throw mRes.error;
 
     if (mRes.data && mRes.data.length > 0) {
-      DATA.members     = mRes.data.map(_rowToMember);
-      DATA.projects    = (pRes.data || []).map(_rowToProject);
+      DATA.members     = mRes.data.map(_rowToMember).sort((a,b) => a.sort_order - b.sort_order);
+      DATA.projects    = (pRes.data || []).map(_rowToProject).sort((a,b) => a.sort_order - b.sort_order);
       DATA.assignments = (aRes.data || []).map(_rowToAssignment);
     } else {
       // 최초 실행: 기본 데이터 Supabase에 업로드
@@ -182,11 +186,26 @@ const DataAPI = {
       _sb.from('wfm_members').upsert(_memberToRow(DATA.members[i])).then(({error}) => { if(error) console.error(error); });
     }
   },
+  reorderMembers(ids) {
+    const map = new Map(DATA.members.map(m => [m.id, m]));
+    DATA.members = ids.map(id => map.get(id)).filter(Boolean);
+    DATA.members.forEach((m, i) => { m.sort_order = i; });
+    const updates = DATA.members.map(m => _memberToRow(m));
+    _sb.from('wfm_members').upsert(updates).then(({error}) => { if(error) console.error(error); });
+  },
   deleteMember(id) {
     DATA.members     = DATA.members.filter(m => m.id !== id);
     DATA.assignments = DATA.assignments.filter(a => a.memberId !== id);
     _sb.from('wfm_members').delete().eq('id', id).then(({error}) => { if(error) console.error(error); });
     _sb.from('wfm_assignments').delete().eq('member_id', id).then(({error}) => { if(error) console.error(error); });
+  },
+
+  reorderProjects(ids) {
+    const map = new Map(DATA.projects.map(p => [p.id, p]));
+    DATA.projects = ids.map(id => map.get(id)).filter(Boolean);
+    DATA.projects.forEach((p, i) => { p.sort_order = i; });
+    const updates = DATA.projects.map(p => _projectToRow(p));
+    _sb.from('wfm_projects').upsert(updates).then(({error}) => { if(error) console.error(error); });
   },
 
   /* ── 프로젝트 ── */

@@ -6,14 +6,14 @@
 const WISENM_ROLES = [
   { id:'pm',    cat:'관리',   name:'PM',              base:2.0, scale:'linear', note:'전체 기간 상주' },
   { id:'pl',    cat:'관리',   name:'PL',              base:2.0, scale:'linear', note:'전체 기간 상주' },
-  { id:'bm',    cat:'관리',   name:'사업관리',         base:2.0, scale:'linear', note:'계약·행정·고객 대응' },
-  { id:'ta',    cat:'기술',   name:'TA',              base:1.0, scale:'dev',    note:'아키텍처·기술 검토' },
-  { id:'infra', cat:'인프라', name:'인프라 담당',      base:1.0, scale:'dev',    note:'서버 4~5개 구성' },
+  { id:'bm',    cat:'관리',   name:'사업관리',         base:2.0, scale:'linear', note:'프로젝트 진행 관리' },
+  { id:'ta',    cat:'기술',   name:'TA',              base:1.0, scale:'dev',    note:'인프라·아키텍처·기술 검토 (고객 별도 요건없을경우 제외 가능)' },
+  { id:'infra', cat:'인프라', name:'인프라 담당',      base:1.0, scale:'dev',    note:'고객사 서버 설치, 네트워크 구성, 방화벽 업무 담당' },
   { id:'sec',   cat:'보안',   name:'인프라 보안',      base:1.0, scale:'dev',    note:'네트워크·서버 보안' },
   { id:'comp',  cat:'보안',   name:'보안성 심의',      base:1.0, scale:'dev',    note:'문서 및 심의 대응' },
-  { id:'aos',   cat:'개발',   name:'Android 개발자',   base:2.0, scale:'dev',    note:'법인폰 앱 개발' },
-  { id:'be',    cat:'개발',   name:'백엔드 개발자',    base:2.0, scale:'dev',    note:'서버 4~5개 / API' },
-  { id:'fe',    cat:'개발',   name:'프론트엔드 개발자',base:2.0, scale:'dev',    note:'관리콘솔 / 모니터링' },
+  { id:'aos',   cat:'개발',   name:'Android 개발자',   base:2.0, scale:'dev',    note:'법인폰 앱 수정 개발' },
+  { id:'be',    cat:'개발',   name:'백엔드 개발자',    base:2.0, scale:'dev',    note:'백엔드 수정 개발' },
+  { id:'fe',    cat:'개발',   name:'프론트엔드 개발자',base:2.0, scale:'dev',    note:'프론트엔드 수정 개발' },
 ];
 
 function _wnScaleDesc(r) {
@@ -24,10 +24,10 @@ function _wnScaleDesc(r) {
 }
 
 const WISENM_VARS = [
-  { id:'si',    name:'SI 커스터마이징',   unit:'M/M', placeholder:'별도 산정', note:'CRM 연동, 업무 특화 기능' },
-  { id:'maint', name:'유지보수',         unit:'MM/월', placeholder:'0.5', note:'운영 안정화 후 적용' },
-  { id:'branch',name:'지점 설치',        unit:'MD/지점', placeholder:'0.5', note:'현장 설치·테스트·교육' },
-  { id:'db',    name:'DB 설치 및 이중화', unit:'M/M', placeholder:'별도 산정', note:'HA 구성 규모에 따라 상이' },
+  { id:'db',    name:'DB 설치 및 이중화', unit:'M/M', placeholder:'별도 산정', note:'HA 구성 규모에 따라 상이 (고객 제공시 제외) 외부업체 "스태커"' },
+  { id:'branch',name:'지점 설치',        unit:'MD/지점', placeholder:'0.5', scale:'일정 협의 기간 + (지점 × n M/D)', note:'현장 설치·테스트·교육 (신한라이프의경우 굉장히 많은 공수가 들어감 미리 협의 필요)' },
+  { id:'maint', name:'유지보수',         unit:'MM/월', placeholder:'0.5', note:'운영 안정화 후 적용 (인력 배정을 위해 M/M단위 필요)' },
+  { id:'si',    name:'SI 커스터마이징',   unit:'M/M', placeholder:'별도 산정', note:'고객사 개발 요건에 따라 상이' },
 ];
 
 // 공수 산정표 상태
@@ -174,19 +174,18 @@ function renderWisenmView() {
   const otherVarsHtml = WISENM_VARS.filter(v=>v.id!=='si').map(v => {
     const val = _wn.vars[v.id] !== undefined ? _wn.vars[v.id] : '';
     const isVarChecked = _wn.varChecked[v.id] === true;
-    const unitSpan = v.unit !== 'M/M' ? `<span class="wn-td-unit">${v.unit}</span>` : '';
+    const unitPrefix = v.unit !== 'M/M' ? `<span class="wn-td-unit" style="margin-right:4px">${v.unit}</span>` : '';
     return `<tr class="wn-var-row${!isVarChecked?' wn-row-dimmed':''}">
       <td class="wn-cat-cell" style="background:${varColor}15">
         <span class="wn-cat-chip" style="background:${varColor};color:#fff">별도</span>
       </td>
       <td class="wn-chk-cell"><input type="checkbox" class="wn-row-chk" data-type="var" data-id="${v.id}" ${isVarChecked?'checked':''}></td>
       <td class="wn-td-name">${v.name}</td>
-      <td></td>
+      <td class="wn-td-scale">${v.scale ? `<span class="wn-scale-desc">${v.scale}</span>` : ''}</td>
       <td class="wn-td-mm">
         <input class="wn-var-input" type="number" step="0.5" min="0" placeholder="${v.placeholder}" value="${val}" data-var="${v.id}">
-        ${unitSpan}
       </td>
-      <td class="wn-td-note">${v.note}</td>
+      <td class="wn-td-note">${unitPrefix}${v.note}</td>
     </tr>`;
   }).join('');
 
@@ -223,13 +222,13 @@ function renderWisenmView() {
               <col style="width:32px">
               <col style="width:150px">
               <col style="width:200px">
-              <col style="width:150px">
+              <col style="width:100px">
               <col>
             </colgroup>
             <thead><tr>
               <th>구분</th><th></th><th>역할</th><th>산정방식</th><th>M/M</th><th>비고</th>
             </tr></thead>
-            <tbody>${rolesHtml}${siHtml}${otherVarsHtml}</tbody>
+            <tbody>${rolesHtml}${otherVarsHtml}${siHtml}</tbody>
             <tfoot><tr class="wn-total-row">
               <td colspan="4">합계</td>
               <td><span class="wn-total-ft" id="wnTotalFt">${grandTotal.toFixed(1)}</span> <span class="wn-td-unit">M/M</span></td>

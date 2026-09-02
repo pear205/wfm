@@ -226,6 +226,7 @@ function renderYearView() {
           <div class="member-name">${esc(mem.name)}</div>
           <div class="member-role">${esc(mem.role)}</div>
         </div>
+        <button class="bulk-open-btn" data-bulk="${mem.id}" title="일괄 공수 입력">+ 일괄</button>
       </div></td>`;
 
     // Greedy lane assignment: 겹치는 프로젝트만 다른 lane, 순차적인건 같은 lane
@@ -608,13 +609,53 @@ function closeDrawer() {
   document.getElementById('drawerOverlay').style.pointerEvents = 'none';
 }
 
+function _initDragReorder(container, dataKey, reorderFn) {
+  let dragId = null;
+  container.addEventListener('dragstart', e => {
+    const item = e.target.closest('[data-drag-id]');
+    if (!item) return;
+    dragId = item.dataset.dragId;
+    item.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  container.addEventListener('dragend', () => {
+    container.querySelectorAll('.dragging,.drag-over').forEach(el => el.classList.remove('dragging','drag-over'));
+  });
+  container.addEventListener('dragover', e => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const item = e.target.closest('[data-drag-id]');
+    container.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+    if (item && item.dataset.dragId !== dragId) item.classList.add('drag-over');
+  });
+  container.addEventListener('dragleave', e => {
+    if (!container.contains(e.relatedTarget)) container.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+  });
+  container.addEventListener('drop', e => {
+    e.preventDefault();
+    const targetItem = e.target.closest('[data-drag-id]');
+    if (!targetItem || targetItem.dataset.dragId === dragId) return;
+    const items = [...container.querySelectorAll('[data-drag-id]')];
+    const ids = items.map(el => el.dataset.dragId);
+    const fromIdx = ids.indexOf(dragId);
+    const toIdx = ids.indexOf(targetItem.dataset.dragId);
+    if (fromIdx < 0 || toIdx < 0) return;
+    ids.splice(fromIdx, 1);
+    ids.splice(toIdx, 0, dragId);
+    reorderFn(ids);
+    renderDrawerContent();
+    render();
+  });
+}
+
 function renderDrawerContent() {
   const tab = state.mgmtTab;
   const body = document.getElementById('drawerBody');
 
   if (tab === 'members') {
     let items = DATA.members.map(mem => `
-      <div class="mgmt-item">
+      <div class="mgmt-item" draggable="true" data-drag-id="${mem.id}">
+        <span class="drag-handle" title="순서 변경">⠿</span>
         <div class="member-avatar" style="background:${mem.color};width:32px;height:32px;font-size:10px;flex-shrink:0">${esc(initials(mem.name))}</div>
         <div class="mgmt-item-info">
           <div class="mgmt-item-name">${esc(mem.name)}</div>
@@ -625,14 +666,16 @@ function renderDrawerContent() {
           <button class="btn-icon-sm danger" data-del-member="${mem.id}" title="삭제">✕</button>
         </div>
       </div>`).join('');
-    body.innerHTML = `<div class="mgmt-list">${items}</div>
+    body.innerHTML = `<div class="mgmt-list" id="memberDragList">${items}</div>
       <button class="mgmt-add-btn" id="addMemberBtn">+ 멤버 추가</button>`;
     document.getElementById('addMemberBtn').onclick = () => openMemberForm(null);
+    _initDragReorder(document.getElementById('memberDragList'), 'mid', DataAPI.reorderMembers.bind(DataAPI));
 
   } else {
     let items = DATA.projects.map(pj => {
       const s = STATUS_KR[pj.status]||esc(pj.status);
-      return `<div class="mgmt-item">
+      return `<div class="mgmt-item" draggable="true" data-drag-id="${pj.id}">
+        <span class="drag-handle" title="순서 변경">⠿</span>
         <div style="width:10px;height:10px;border-radius:50%;background:${pj.color};flex-shrink:0;margin-top:2px"></div>
         <div class="mgmt-item-info">
           <div class="mgmt-item-name">${esc(pj.name)}</div>
@@ -643,9 +686,10 @@ function renderDrawerContent() {
           <button class="btn-icon-sm danger" data-del-project="${pj.id}" title="삭제">✕</button>
         </div>
       </div>`;}).join('');
-    body.innerHTML = `<div class="mgmt-list">${items}</div>
+    body.innerHTML = `<div class="mgmt-list" id="projDragList">${items}</div>
       <button class="mgmt-add-btn" id="addProjectBtn">+ 프로젝트 추가</button>`;
     document.getElementById('addProjectBtn').onclick = () => openProjectForm(null);
+    _initDragReorder(document.getElementById('projDragList'), 'pid', DataAPI.reorderProjects.bind(DataAPI));
   }
 }
 
@@ -1124,6 +1168,125 @@ function saveMemberAssignForm() {
 }
 
 // ═══════════════════════════════════════════════════════════
+// BULK ASSIGN MODAL
+// ═══════════════════════════════════════════════════════════
+const MM_CYCLE_BULK = [0.25, 0.5, 0.75, 1.0];
+const MM_ALPHA_BULK = {0.25: 0.38, 0.5: 0.58, 0.75: 0.78, 1.0: 1.0};
+
+function _bulkBarColor(hex, mv) {
+  const a = MM_ALPHA_BULK[mv] ?? 1;
+  const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+  const mix = v => Math.round(v*a + 255*(1-a));
+  return `rgb(${mix(r)},${mix(g)},${mix(b)})`;
+}
+
+const _bulk = { memberId:null, projId:null, start:null, end:null, mmVals:{}, dragging:false, dragMoved:false };
+
+function openBulkModal(memberId) {
+  _bulk.memberId = memberId; _bulk.projId = null; _bulk.start = null; _bulk.end = null; _bulk.mmVals = {};
+  const mem = getMember(memberId);
+  document.getElementById('bulkTitle').textContent = `${mem?.name} · ${state.year}년 일괄 공수 입력`;
+  renderBulkModal();
+  document.getElementById('bulkModal').classList.remove('hidden');
+}
+
+function renderBulkModal() {
+  const year = state.year;
+  const activeProjs = DATA.projects.filter(p => {
+    if (!p.start || !p.end) return false;
+    const [sy, sm] = p.start.split('-').map(Number);
+    const [ey, em] = p.end.split('-').map(Number);
+    return (sy < year || (sy === year)) && (ey > year || ey === year);
+  });
+  let projOpts = `<option value="">프로젝트 선택</option>`;
+  activeProjs.forEach(p => { projOpts += `<option value="${p.id}"${_bulk.projId===p.id?' selected':''}>${esc(p.name)}</option>`; });
+
+  const proj = _bulk.projId ? DATA.projects.find(p => p.id === _bulk.projId) : null;
+  const MONTHS_KR = ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
+  const s = _bulk.start === null ? 99 : Math.min(_bulk.start, _bulk.end ?? _bulk.start);
+  const e = _bulk.end === null ? -1 : Math.max(_bulk.start ?? 0, _bulk.end);
+
+  let monthTrack = '';
+  for (let m = 1; m <= 12; m++) {
+    let enabled = false;
+    if (proj && proj.start && proj.end) {
+      const [sy, sm] = proj.start.split('-').map(Number);
+      const [ey, em] = proj.end.split('-').map(Number);
+      const mAbs = year*12+m;
+      enabled = mAbs >= sy*12+sm && mAbs <= ey*12+em;
+    }
+    const inRange = enabled && m >= s && m <= e;
+    const mv = _bulk.mmVals[m] ?? 1.0;
+    let barStyle = '', valHtml = '';
+    if (inRange && proj) {
+      barStyle = ` style="background:${_bulkBarColor(proj.color, mv)}"`;
+      const tc = mv <= 0.25 ? 'rgba(0,0,0,.5)' : '#fff';
+      valHtml = `<span class="bulk-val" style="color:${tc}">${mv === 1 ? '1.0' : mv}</span>`;
+    }
+    monthTrack += `<div class="bulk-mcell${inRange?' selected':''}${proj&&!enabled?' disabled':''}" data-m="${m}" data-en="${enabled?1:0}">
+      <div class="bulk-label">${MONTHS_KR[m-1]}</div>
+      <div class="bulk-bar"${barStyle}>${valHtml}</div>
+    </div>`;
+  }
+
+  let hint = '시작 월을 클릭하세요';
+  if (_bulk.start !== null) {
+    const mn = Math.min(_bulk.start, _bulk.end??_bulk.start), mx = Math.max(_bulk.start, _bulk.end??_bulk.start);
+    let total = 0; for (let m=mn; m<=mx; m++) total += _bulk.mmVals[m]??1;
+    hint = `${mn}월~${mx}월 · 총 ${(Math.round(total*100)/100).toString().replace(/\.?0+$/,'')||'0'} M/M`;
+  }
+
+  document.getElementById('bulkBody').innerHTML = `
+    <div class="bulk-field">
+      <label class="bulk-lbl">프로젝트</label>
+      <select id="bulkProjSel" style="width:100%">${projOpts}</select>
+      ${proj ? `<div class="bulk-range-hint">기간: ${proj.start.replace('-','년 ')}월 ~ ${proj.end.replace('-','년 ')}월</div>` : ''}
+    </div>
+    <div class="bulk-field">
+      <label class="bulk-lbl">적용 기간 — 드래그로 범위 선택 · 클릭 또는 휠로 공수 조정 (0.25/0.5/0.75/1.0)</label>
+      <div class="bulk-track" id="bulkTrack">${monthTrack}</div>
+      <div class="bulk-hint">${hint}</div>
+    </div>`;
+
+  document.getElementById('bulkProjSel').onchange = e => {
+    _bulk.projId = e.target.value || null; _bulk.start = null; _bulk.end = null; _bulk.mmVals = {};
+    renderBulkModal();
+  };
+
+  const track = document.getElementById('bulkTrack');
+  if (!track) return;
+  track.addEventListener('mousedown', e => {
+    const c = e.target.closest('.bulk-mcell');
+    if (!c || c.dataset.en !== '1') return;
+    _bulk.dragging = true; _bulk.dragMoved = false;
+    _bulk.start = +c.dataset.m; _bulk.end = +c.dataset.m; renderBulkModal();
+  });
+  track.addEventListener('mouseover', e => {
+    if (!_bulk.dragging) return;
+    const c = e.target.closest('.bulk-mcell');
+    if (!c || c.dataset.en !== '1') return;
+    const m = +c.dataset.m; if (m !== _bulk.end) { _bulk.dragMoved = true; _bulk.end = m; renderBulkModal(); }
+  });
+  track.addEventListener('wheel', e => {
+    e.preventDefault();
+    const c = e.target.closest('.bulk-mcell');
+    if (!c || !c.classList.contains('selected')) return;
+    const m = +c.dataset.m, cur = _bulk.mmVals[m]??1.0;
+    const idx = MM_CYCLE_BULK.indexOf(cur);
+    _bulk.mmVals[m] = MM_CYCLE_BULK[(idx+(e.deltaY<0?1:-1)+MM_CYCLE_BULK.length)%MM_CYCLE_BULK.length];
+    renderBulkModal();
+  }, {passive:false});
+}
+
+function saveBulkModal() {
+  if (!_bulk.projId || _bulk.start === null) return;
+  const mn = Math.min(_bulk.start, _bulk.end??_bulk.start), mx = Math.max(_bulk.start, _bulk.end??_bulk.start);
+  for (let m = mn; m <= mx; m++) DataAPI.setAssignment(_bulk.memberId, _bulk.projId, state.year, m, _bulk.mmVals[m]??1.0, '상주');
+  document.getElementById('bulkModal').classList.add('hidden');
+  render();
+}
+
+// ═══════════════════════════════════════════════════════════
 // ASSIGN MODAL
 // ═══════════════════════════════════════════════════════════
 function openAssignModal(memberId, year, month) {
@@ -1540,6 +1703,10 @@ document.getElementById('grid-container').addEventListener('click', e => {
   const benchMo = e.target.closest('[data-bench-mo]');
   if (benchMo && state.viewMode==='bench') { state.benchMonth = parseInt(benchMo.dataset.benchMo); renderBenchView(); return; }
 
+// Bulk assign button
+  const bulkBtn = e.target.closest('[data-bulk]');
+  if (bulkBtn) { e.stopPropagation(); openBulkModal(bulkBtn.dataset.bulk); return; }
+
 // Member cell click → member panel
   const memCell = e.target.closest('.member-cell');
   if (memCell) { e.stopPropagation(); renderMemberPanel(memCell.dataset.member); return; }
@@ -1639,6 +1806,24 @@ document.getElementById('formDeleteBtn').onclick = function() {
 };
 document.getElementById('formCancelBtn').onclick = closeFormModal;
 document.getElementById('formClose').onclick     = closeFormModal;
+
+// Bulk assign modal
+document.getElementById('bulkClose').onclick = () => document.getElementById('bulkModal').classList.add('hidden');
+document.getElementById('bulkCancelBtn').onclick = () => document.getElementById('bulkModal').classList.add('hidden');
+document.getElementById('bulkSaveBtn').onclick = saveBulkModal;
+document.addEventListener('mouseup', e => {
+  if (!_bulk.dragging) return;
+  if (!_bulk.dragMoved) {
+    const c = e.target.closest?.('.bulk-mcell');
+    if (c && c.classList.contains('selected')) {
+      const m = +c.dataset.m, cur = _bulk.mmVals[m]??1.0;
+      const idx = MM_CYCLE_BULK.indexOf(cur);
+      _bulk.mmVals[m] = MM_CYCLE_BULK[(idx+1)%MM_CYCLE_BULK.length];
+      renderBulkModal();
+    }
+  }
+  _bulk.dragging = false; _bulk.dragMoved = false;
+});
 
 // Assign modal
 document.getElementById('assignClose').onclick = () => {

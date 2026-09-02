@@ -144,6 +144,22 @@
   </div>
 </div>
 
+<!-- Bulk assign modal -->
+<div class="modal-overlay hidden" id="bulkModal">
+  <div class="modal-card modal-lg">
+    <div class="modal-header">
+      <span class="modal-title" id="bulkTitle">일괄 공수 입력</span>
+      <button class="modal-close-btn" id="bulkClose">✕</button>
+    </div>
+    <div class="modal-body" id="bulkBody"></div>
+    <div class="modal-footer">
+      <div style="flex:1"></div>
+      <button class="btn-ghost" id="bulkCancelBtn">취소</button>
+      <button class="btn-primary" id="bulkSaveBtn">저장</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="data.js"></script>
 <script src="wisenm.js"></script>
