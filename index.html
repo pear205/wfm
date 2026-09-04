@@ -57,6 +57,15 @@
       <option value="">프로젝트 전체</option>
     </select>
     <div class="filter-bar-sep"></div>
+    <div class="assign-mode-seg" id="assignModeSeg">
+      <button class="amseg-btn" data-amode="plan">계획</button>
+      <button class="amseg-btn active" data-amode="actual">실제</button>
+      <button class="amseg-btn" data-amode="both">비교</button>
+    </div>
+    <label class="filter-bar-check">
+      <input type="checkbox" id="showAllowanceCheck">현장수당
+    </label>
+    <div class="filter-bar-sep"></div>
     <div class="export-wrap" id="exportWrap">
       <button class="export-btn" id="exportBtn">↓ 내보내기</button>
       <div class="export-dropdown hidden" id="exportDropdown">
@@ -79,6 +88,7 @@
     </div>
   </div>
 
+  <div id="kpi-wrap"></div>
   <div id="main">
     <div id="grid-wrap">
       <div id="grid-container"></div>
@@ -124,7 +134,7 @@
 
 <!-- Form modal (member/project add·edit) -->
 <div class="modal-overlay hidden" id="formModal">
-  <div class="modal-card">
+  <div class="modal-card" style="max-width:580px">
     <div class="modal-header">
       <span class="modal-title" id="formTitle">멤버 추가</span>
       <button class="modal-close-btn" id="formClose">✕</button>

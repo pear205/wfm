@@ -115,7 +115,8 @@ button{cursor:pointer;border:none;background:none;font-family:inherit}
 #subheader.hidden{display:none}
 
 /* ─── Main ─── */
-#main{flex:1;overflow:hidden;display:flex}
+#kpi-wrap{flex-shrink:0;overflow:hidden}
+#main{flex:1;overflow:hidden;display:flex;min-height:0}
 #grid-wrap{flex:1;overflow:auto;position:relative}
 
 /* ── DataGrid ─ .year-table .col-* .assign-cell */
@@ -173,6 +174,11 @@ button{cursor:pointer;border:none;background:none;font-family:inherit}
 .cell-total-bar{height:10px;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:700;color:rgba(255,255,255,.9);flex-shrink:0;background:rgba(100,116,139,.55)}
 .cell-total-bar.is-empty{background:rgba(100,116,139,.13)}
 .proj-bar{height:18px;border-radius:4px;display:flex;align-items:center;padding:0 6px;gap:3px;cursor:pointer;transition:filter .12s;overflow:hidden;position:relative;filter:saturate(72%)}
+/* 비교 모드 — 위=계획(연한), 아래=실제(진한) 두 띠 */
+.proj-bar.proj-bar-both{height:32px;flex-direction:column;padding:0;align-items:stretch;position:relative;overflow:hidden;gap:1px}
+.pb-plan-strip,.pb-act-strip{flex:1;display:flex;align-items:center;padding:0 18px 0 5px;gap:4px}
+.pb-strip-val{font-size:10px;font-weight:600;color:#fff;flex-shrink:0;margin-left:auto}
+.pb-plan-strip .proj-bar-name{font-size:9px;color:#fff;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .proj-bar:hover{filter:saturate(90%) brightness(1.06)}
 .proj-bar-del{opacity:0;pointer-events:none;position:absolute;right:3px;top:50%;transform:translateY(-50%);width:14px;height:14px;border-radius:3px;background:rgba(0,0,0,.35);color:#fff;font-size:9px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;transition:opacity .1s;user-select:none}
 .proj-bar:hover .proj-bar-del{opacity:1;pointer-events:auto}
@@ -598,3 +604,47 @@ button{cursor:pointer;border:none;background:none;font-family:inherit}
 /* 각주 */
 .wn-footnote{margin-top:16px;padding:10px 14px;background:var(--bg-alt);border-radius:8px;font-size:11px;color:var(--text-s);line-height:1.7;border:1px solid var(--border)}
 .wn-fn-title{font-weight:700;color:var(--text-p);margin-right:6px}
+
+/* ─── 투입 모드 세그먼트 (실제/계획/비교) ─── */
+.assign-mode-seg{display:flex;border:1px solid var(--border);border-radius:7px;overflow:hidden;flex-shrink:0}
+.amseg-btn{padding:4px 10px;font-size:11px;font-weight:500;background:transparent;border:none;color:var(--text-s);cursor:pointer;transition:background .12s,color .12s;white-space:nowrap}
+.amseg-btn:hover{background:var(--bg-alt);color:var(--text-p)}
+.amseg-btn.active{background:var(--accent);color:#fff}
+.amseg-btn+.amseg-btn{border-left:1px solid var(--border)}
+
+/* ─── 현장수당 행 ─── */
+.allow-row td{height:18px;padding:0;border-bottom:1px solid var(--border)}
+.allow-label-cell{padding-left:12px!important;font-size:10px;color:var(--text-m);font-weight:500;letter-spacing:.02em;white-space:nowrap;vertical-align:middle}
+.allow-cell{text-align:center;vertical-align:middle;cursor:pointer;transition:background .1s}
+.allow-cell:hover{background:rgba(224,151,33,.12)}
+.allow-cell.allow-on{background:rgba(224,151,33,.1)}
+.allow-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#E09721}
+
+/* ─── 실제 M/M 입력 (월별 공수 폼) ─── */
+.ma-actual-row{display:flex;align-items:center;gap:4px;margin-top:4px;padding-top:3px;border-top:1px dashed var(--border)}
+.ma-actual-label{font-size:9px;color:var(--text-m);white-space:nowrap;flex-shrink:0}
+.ma-month-actual-input{width:100%;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-app);color:var(--text-p);font-size:11px;font-family:'JetBrains Mono',monospace;text-align:right;-moz-appearance:textfield}
+.ma-month-actual-input:focus{outline:none;border-color:var(--accent)}
+.ma-month-actual-input::-webkit-outer-spin-button,.ma-month-actual-input::-webkit-inner-spin-button{-webkit-appearance:none}
+
+/* ─── 공수 항목 (assign modal): 계획/실제 표시 ─── */
+.assign-item-mm{display:flex;gap:6px;align-items:baseline;font-size:11px;flex-wrap:wrap;margin-top:2px}
+.assign-item-mm .plan-val{color:var(--text-s)}
+.assign-item-mm .actual-val{font-weight:700;font-family:'JetBrains Mono',monospace}
+.assign-item-mm .actual-over{color:#c62828}
+.assign-item-mm .actual-ok{color:var(--ok)}
+.assign-item-mm .actual-under{color:var(--accent)}
+/* 멤버 투입 폼 — 계획/실제 2행 그리드 트랙 */
+.ma-track-grid{display:grid;grid-template-columns:36px repeat(12,1fr);gap:2px 3px;user-select:none;width:100%;box-sizing:border-box}
+.ma-month-hdr{font-size:10px;color:var(--text-m);text-align:center;padding:2px 0}
+.ma-row-lbl{display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;border-radius:4px;padding:2px 0}
+.ma-row-lbl.plan-lbl{color:var(--accent);background:var(--accent-muted,rgba(0,120,255,.08))}
+.ma-row-lbl.act-lbl{color:#27ae60;background:rgba(39,174,96,.08)}
+.ma-plan-cell,.ma-act-cell{height:30px;border-radius:4px;cursor:pointer;overflow:hidden;transition:opacity .1s}
+.ma-plan-cell .bulk-bar,.ma-act-cell .bulk-bar{width:100%;height:100%;border-radius:4px;display:flex;align-items:center;justify-content:center;border:1px dashed var(--border);box-sizing:border-box;transition:background .1s}
+.ma-plan-cell.selected .bulk-bar,.ma-act-cell.act-selected .bulk-bar{border:none}
+.ma-plan-cell.plan-off .bulk-bar{background:transparent!important;border:1px dashed var(--border);opacity:.35}
+.ma-plan-cell:hover,.ma-act-cell:hover{opacity:.8}
+/* legacy compat */
+.bulk-mcell.ma-dual{display:flex;flex-direction:column;gap:2px}
+.act-bar{display:none}

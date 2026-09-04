@@ -45,7 +45,7 @@ function _mkA(memberId, projectId, startY, startM, endY, endM, mm, type) {
   const result = [];
   let y = startY, m = startM;
   while (y < endY || (y === endY && m <= endM)) {
-    result.push({ memberId, projectId, year: y, month: m, mm, type });
+    result.push({ memberId, projectId, year: y, month: m, mm, mm_plan: mm, mm_actual: 0, type });
     m++; if (m > 12) { m = 1; y++; }
   }
   return result;
@@ -123,16 +123,22 @@ function _projectToRow(p) {
            sort_order: p.sort_order ?? 0 };
 }
 function _rowToAssignment(r) {
+  const mm_plan = parseFloat(r.mm_plan) || parseFloat(r.mm) || 0;
+  const mm_actual = parseFloat(r.mm_actual) || 0;
   return { memberId: r.member_id, projectId: r.project_id,
-           year: r.year, month: r.month, mm: parseFloat(r.mm), type: r.type };
+           year: r.year, month: r.month, mm: mm_plan, mm_plan, mm_actual, type: r.type };
 }
 function _assignmentToRow(a) {
+  const mm_plan = a.mm_plan != null ? a.mm_plan : (a.mm || 0);
   return { member_id: a.memberId, project_id: a.projectId,
-           year: a.year, month: a.month, mm: a.mm, type: a.type };
+           year: a.year, month: a.month, mm: mm_plan, mm_plan, mm_actual: a.mm_actual || 0, type: a.type };
+}
+function _rowToAllowance(r) {
+  return { memberId: r.member_id, year: r.year, month: r.month };
 }
 
 // ─── 런타임 데이터 ───
-const DATA = { members: [], projects: [], assignments: [] };
+const DATA = { members: [], projects: [], assignments: [], allowances: [] };
 
 function _deepCopy(obj) { return JSON.parse(JSON.stringify(obj)); }
 
@@ -144,10 +150,11 @@ function _resetToDefaults() {
 
 async function loadData() {
   try {
-    const [mRes, pRes, aRes] = await Promise.all([
+    const [mRes, pRes, aRes, alRes] = await Promise.all([
       _sb.from('wfm_members').select('*'),
       _sb.from('wfm_projects').select('*'),
       _sb.from('wfm_assignments').select('*'),
+      _sb.from('wfm_allowances').select('*'),
     ]);
     if (mRes.error) throw mRes.error;
 
@@ -155,6 +162,7 @@ async function loadData() {
       DATA.members     = mRes.data.map(_rowToMember).sort((a,b) => a.sort_order - b.sort_order);
       DATA.projects    = (pRes.data || []).map(_rowToProject).sort((a,b) => a.sort_order - b.sort_order);
       DATA.assignments = (aRes.data || []).map(_rowToAssignment);
+      DATA.allowances  = (alRes.data || []).map(_rowToAllowance);
     } else {
       // 최초 실행: 기본 데이터 Supabase에 업로드
       _resetToDefaults();
@@ -196,8 +204,10 @@ const DataAPI = {
   deleteMember(id) {
     DATA.members     = DATA.members.filter(m => m.id !== id);
     DATA.assignments = DATA.assignments.filter(a => a.memberId !== id);
+    DATA.allowances  = DATA.allowances.filter(a => a.memberId !== id);
     _sb.from('wfm_members').delete().eq('id', id).then(({error}) => { if(error) console.error(error); });
     _sb.from('wfm_assignments').delete().eq('member_id', id).then(({error}) => { if(error) console.error(error); });
+    _sb.from('wfm_allowances').delete().eq('member_id', id).then(({error}) => { if(error) console.error(error); });
   },
 
   reorderProjects(ids) {
@@ -230,14 +240,15 @@ const DataAPI = {
   },
 
   /* ── 공수 ── */
-  setAssignment(memberId, projectId, year, month, mm, type) {
+  setAssignment(memberId, projectId, year, month, mm_plan, mm_actual, type) {
+    const entry = {memberId, projectId, year, month, mm: mm_plan, mm_plan, mm_actual: mm_actual||0, type};
     const i = DATA.assignments.findIndex(a =>
       a.memberId===memberId && a.projectId===projectId && a.year===year && a.month===month
     );
-    if (i >= 0) { DATA.assignments[i] = {memberId, projectId, year, month, mm, type}; }
-    else        { DATA.assignments.push({memberId, projectId, year, month, mm, type}); }
+    if (i >= 0) { DATA.assignments[i] = entry; }
+    else        { DATA.assignments.push(entry); }
     _sb.from('wfm_assignments')
-      .upsert({ member_id:memberId, project_id:projectId, year, month, mm, type })
+      .upsert({ member_id:memberId, project_id:projectId, year, month, mm: mm_plan, mm_plan, mm_actual: mm_actual||0, type })
       .then(({error}) => { if(error) console.error(error); });
   },
   deleteAssignment(memberId, projectId, year, month) {
@@ -250,13 +261,33 @@ const DataAPI = {
       .then(({error}) => { if(error) console.error(error); });
   },
 
+  /* ── 현장수당 ── */
+  toggleAllowance(memberId, year, month) {
+    const i = DATA.allowances.findIndex(a => a.memberId===memberId && a.year===year && a.month===month);
+    if (i >= 0) {
+      DATA.allowances.splice(i, 1);
+      _sb.from('wfm_allowances').delete()
+        .eq('member_id', memberId).eq('year', year).eq('month', month)
+        .then(({error}) => { if(error) console.error(error); });
+    } else {
+      DATA.allowances.push({memberId, year, month});
+      _sb.from('wfm_allowances').insert({member_id: memberId, year, month})
+        .then(({error}) => { if(error) console.error(error); });
+    }
+  },
+  hasAllowance(memberId, year, month) {
+    return DATA.allowances.some(a => a.memberId===memberId && a.year===year && a.month===month);
+  },
+
   /* ── 초기화 ── */
   async reset() {
     _resetToDefaults();
+    DATA.allowances = [];
     await Promise.all([
       _sb.from('wfm_assignments').delete().neq('member_id', ''),
       _sb.from('wfm_projects').delete().neq('id', ''),
       _sb.from('wfm_members').delete().neq('id', ''),
+      _sb.from('wfm_allowances').delete().neq('member_id', ''),
     ]);
     await Promise.all([
       _sb.from('wfm_members').insert(DATA.members.map(_memberToRow)),

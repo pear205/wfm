@@ -29,6 +29,8 @@ const state = {
   benchShowAvailOnly: false,
   benchSkillFilter: [],   // 선택된 스킬 이름 배열
   _tmpSkills: [],
+  assignMode: 'actual',  // 'actual' | 'plan' | 'both'
+  showAllowance: false,
 };
 
 // ─── Auth (Supabase Auth) ───
@@ -89,8 +91,18 @@ function getAssignments(memberId, year, month) {
     a.memberId === memberId && a.year === year && a.month === month
   );
 }
+function getDisplayMM(a) {
+  const mp = a.mm_plan != null ? a.mm_plan : (a.mm || 0);
+  const ma = a.mm_actual || 0;
+  if (state.assignMode === 'plan') return mp;
+  return ma > 0 ? ma : mp;
+}
+function _hexRgba(hex, a) {
+  const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${a})`;
+}
 function getTotalMM(memberId, year, month) {
-  return getAssignments(memberId, year, month).reduce((s,a) => s+a.mm, 0);
+  return getAssignments(memberId, year, month).reduce((s,a) => s + getDisplayMM(a), 0);
 }
 function mmClass(mm) {
   if (mm <= 0)    return 'empty';
@@ -106,11 +118,11 @@ function monthlyMaxCap(year, month) {
 
 function getMemberYearStats(memberId, year) {
   const as = DATA.assignments.filter(a => a.memberId === memberId && a.year === year);
-  const totalMM = as.reduce((s,a) => s+a.mm, 0);
+  const totalMM = as.reduce((s,a) => s+getDisplayMM(a), 0);
   const projectIds = [...new Set(as.map(a => a.projectId))];
   const monthlyMM = Array.from({length:12}, (_,i) =>
     DATA.assignments.filter(a => a.memberId===memberId && a.year===year && a.month===i+1)
-      .reduce((s,a)=>s+a.mm,0)
+      .reduce((s,a)=>s+getDisplayMM(a),0)
   );
   return { totalMM, projectCount: projectIds.length, projectIds, monthlyMM };
 }
@@ -156,7 +168,7 @@ function renderYearView() {
   let sumRow = `<tr class="grid-total-row"><th class="col-member grid-total-row"><div class="grid-total-label"><span>팀</span><span>합계</span></div></th>`;
   const _moArr = [], _capArr = [];
   for (let m=1; m<=12; m++) {
-    const mo = DATA.members.reduce((s,mem) => s + getAssignments(mem.id,year,m).reduce((ss,a)=>ss+a.mm,0), 0);
+    const mo = DATA.members.reduce((s,mem) => s + getTotalMM(mem.id,year,m), 0);
     const mCap = monthlyMaxCap(year, m);
     _moArr.push(mo);
     _capArr.push(mCap);
@@ -180,13 +192,14 @@ function renderYearView() {
   const _availDispCol = _teamAvail<0?'var(--over)':_teamAvail===0?'var(--ok)':'var(--warn)';
   const _totalCol = _teamAvail<0?'var(--over)':_teamAvail===0?'var(--ok)':'var(--warn)';
 
-  let html = `<div class="kpi-panel"><div class="kpi-cards">
+  document.getElementById('kpi-wrap').innerHTML = `<div class="kpi-panel"><div class="kpi-cards">
     <div class="kpi-card"><div class="kpi-card__label">연간 팀 M/M</div><div class="kpi-card__value" style="color:${_totalCol}">${_teamTotal.toFixed(1)}</div></div>
     <div class="kpi-card"><div class="kpi-card__label">평균 가동률</div><div class="kpi-card__value">${_utilPct}%</div></div>
     <div class="kpi-card"><div class="kpi-card__label">초과 투입 월</div><div class="kpi-card__value" style="color:${_overMo>0?'var(--over)':'var(--text-s)'}">${_overMo}</div></div>
     <div class="kpi-card"><div class="kpi-card__label">연간 여유 M/M</div><div class="kpi-card__value" style="color:${_availDispCol}">${_teamAvailFmt}</div></div>
-  </div></div>
-  <table class="year-table"><thead>${sumRow}<tr>
+  </div></div>`;
+
+  let html = `<table class="year-table"><thead>${sumRow}<tr>
     <th class="col-member th-corner">멤버</th>`;
 
   for (let m=1; m<=12; m++) {
@@ -270,20 +283,57 @@ function renderYearView() {
         const cR = nextIds.has(a.projectId);
         const rl = cL?0:4, rr = cR?0:4;
         const assignKey = JSON.stringify({mid:mem.id,pid:pj.id,y:year,mo:m});
-        html += `<div class="proj-bar ${a.type==='비상주'?'biju':''}"
-          style="background:${pj.color};color:#fff;border-radius:${rl}px ${rr}px ${rr}px ${rl}px"
-          data-project="${pj.id}" data-assign='${assignKey}'
-          title="${esc(pj.name)} · ${a.mm.toFixed(2)} M/M · ${a.type} — 클릭하여 공수 수정" data-member="${mem.id}">
-          ${isFirst ? `<span class="proj-bar-name">${esc(pj.name)}</span>` : ''}
-          <span class="proj-bar-mm" style="font-size:10px${!isFirst?';flex:1;text-align:center':''}">${fmtMM(a.mm)}</span>
-          <span class="proj-bar-del" data-del-assign='${assignKey}' title="공수 삭제">✕</span>
-        </div>`;
+        // 모드별 바 스타일
+        const _mp = a.mm_plan != null ? a.mm_plan : (a.mm || 0);
+        const _ma = a.mm_actual || 0;
+        const _titleMM = state.assignMode==='both'
+          ? `계획 ${_mp.toFixed(2)} / 실제 ${_ma.toFixed(2)} M/M`
+          : `${(state.assignMode==='plan'?_mp:(_ma||_mp)).toFixed(2)} M/M`;
+        const _barAttrs = `data-project="${pj.id}" data-assign='${assignKey}' title="${esc(pj.name)} · ${_titleMM} · ${a.type} — 클릭하여 공수 수정" data-member="${mem.id}"`;
+        const _biju = a.type==='비상주'?'biju':'';
+
+        if (state.assignMode === 'both') {
+          // 비교 모드: 단일 바, 배경=계획(연한), fill=실제(진한)
+          const actOver = _ma > _mp + 0.05;
+          const actUnder = _ma > 0 && _ma < _mp - 0.05;
+          const actFillColor = actOver ? _hexRgba('#c62828', 0.92) : _hexRgba(pj.color, 0.95);
+          const planBg = _hexRgba(pj.color, 0.9);
+          const fillPct = _mp > 0 ? Math.min(100, (_ma / _mp) * 100) : (_ma > 0 ? 100 : 0);
+          const actBgFull = actOver ? _hexRgba('#c62828', 0.65) : _hexRgba(pj.color, 0.45);
+          html += `<div class="proj-bar proj-bar-both ${_biju}"
+            style="border-radius:${rl}px ${rr}px ${rr}px ${rl}px"
+            ${_barAttrs}>
+            <div class="pb-plan-strip" style="background:${planBg};border-radius:${rl}px ${rr}px 0 0">
+              ${isFirst ? `<span class="proj-bar-name" style="font-size:9px">${esc(pj.name)}</span>` : '<span></span>'}
+              <span class="pb-strip-val">${fmtMM(_mp)}</span>
+            </div>
+            <div class="pb-act-strip" style="background:${actBgFull};border-radius:0 0 ${rr}px ${rl}px">
+              ${isFirst ? '<span></span>' : ''}
+              <span class="pb-strip-val">${_ma > 0 ? fmtMM(_ma) : '—'}</span>
+            </div>
+            <span class="proj-bar-del" data-del-assign='${assignKey}' title="공수 삭제" style="position:absolute;right:4px;top:50%;transform:translateY(-50%)">✕</span>
+          </div>`;
+        } else {
+          let _barBg, _mmDisp;
+          if (state.assignMode === 'plan') {
+            _barBg = _hexRgba(pj.color, 0.82); _mmDisp = fmtMM(_mp);
+          } else {
+            _barBg = _hexRgba(pj.color, _ma > 0 ? 1 : 0.35); _mmDisp = fmtMM(_ma > 0 ? _ma : _mp);
+          }
+          html += `<div class="proj-bar ${_biju}"
+            style="background:${_barBg};color:#fff;border-radius:${rl}px ${rr}px ${rr}px ${rl}px"
+            ${_barAttrs}>
+            ${isFirst ? `<span class="proj-bar-name">${esc(pj.name)}</span>` : ''}
+            <span class="proj-bar-mm" style="font-size:10px${!isFirst?';flex:1;text-align:center':''}">${_mmDisp}</span>
+            <span class="proj-bar-del" data-del-assign='${assignKey}' title="공수 삭제">✕</span>
+          </div>`;
+        }
       }
       html += `</div></td>`;
     }
     // 연간 가용 컬럼
     const monthlyTotals = Array.from({length:12},(_,i)=>
-      Math.round(getAssignments(mem.id,year,i+1).reduce((s,a)=>s+a.mm,0)*100)/100
+      Math.round(getTotalMM(mem.id,year,i+1)*100)/100
     );
     const annualAvail = Math.round((monthlyTotals.reduce((s,v)=>s+v,0) - 12)*10)/10;
     const spark = monthlyTotals.map(v=>{
@@ -303,6 +353,17 @@ function renderYearView() {
       <div class="annual-avail-num" style="color:${numCol}">${numLabel}</div>
     </div></td>`;
     html += `</tr>`;
+    // 현장수당 서브 행
+    if (state.showAllowance) {
+      html += `<tr class="allow-row">`;
+      html += `<td class="col-member allow-label-cell">₩ 현장수당</td>`;
+      for (let m=1; m<=12; m++) {
+        const isCur = year===CUR_YEAR && m===CUR_MONTH;
+        const hasAl = DataAPI.hasAllowance(mem.id, year, m);
+        html += `<td class="col-month allow-cell ${hasAl?'allow-on':''} ${isCur?'today-col':''}" data-allow-member="${mem.id}" data-allow-month="${m}">${hasAl?'<span class="allow-dot"></span>':''}</td>`;
+      }
+      html += `<td class="col-annual"></td></tr>`;
+    }
   });
 
   html += `</tbody></table>`;
@@ -369,11 +430,9 @@ function renderBenchView() {
     return true;
   });
 
-  let html = `<div class="bench-outer">`;
-
-  // 상단 요약 + 가용인력 패널
+  // 상단 요약 + 가용인력 패널 → 스크롤 밖 kpi-wrap으로
   const availItems = selData.filter(d=>d.avail>0);
-  html += `<div class="kpi-panel">
+  document.getElementById('kpi-wrap').innerHTML = `<div class="kpi-panel">
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:stretch">
       <div class="kpi-cards">
         <div class="kpi-card"><div class="kpi-card__label">${selMo}월 팀 M/M</div><div class="kpi-card__value">${fmtMM(sumTotal)}</div></div>
@@ -397,6 +456,8 @@ function renderBenchView() {
       </div>
     </div>
   </div>`;
+
+  let html = `<div class="bench-outer">`;
 
   // 테이블 — thead에 grid-total-row(팀 가용) 먼저, 그 다음 멤버 헤더
   const benchSumRow = `<tr class="grid-total-row"><th class="col-member grid-total-row"><div class="grid-total-label"><span>가용 인력</span><span>공수</span></div></th>${
@@ -962,207 +1023,273 @@ function closeFormModal() {
 // ═══════════════════════════════════════════════════════════
 // MEMBER-ASSIGN FORM (투입 공수 설정)
 // ═══════════════════════════════════════════════════════════
-function openMemberAssignForm(projectId, editMemberId) {
-  state.formMode = {type:'memberAssign', id: projectId, editMemberId: editMemberId||null};
+const _maForm = { start: null, end: null, mmVals: {}, actualVals: {}, dragging: false, dragMoved: false, actStart: null, actEnd: null, actDragging: false, actDragMoved: false };
+
+function renderMAFormTrack() {
+  const projectId = document.getElementById('maFProject')?.value || state.formMode?.id;
   const pj = getProject(projectId);
-  document.getElementById('formTitle').textContent = `멤버 투입 · ${pj?.name||''}`;
+  const year = state.year;
+
+  const enabledSet = new Set();
+  if (pj?.start && pj?.end) {
+    const [sy, sm] = pj.start.split('-').map(Number);
+    const [ey, em] = pj.end.split('-').map(Number);
+    for (let m = 1; m <= 12; m++) {
+      if (year*12+m >= sy*12+sm && year*12+m <= ey*12+em) enabledSet.add(m);
+    }
+  } else {
+    for (let m = 1; m <= 12; m++) enabledSet.add(m);
+  }
+
+  const ps = _maForm.start === null ? 99 : Math.min(_maForm.start, _maForm.end ?? _maForm.start);
+  const pe = _maForm.end   === null ? -1 : Math.max(_maForm.start ?? 0, _maForm.end);
+  const as = _maForm.actStart === null ? 99 : Math.min(_maForm.actStart, _maForm.actEnd ?? _maForm.actStart);
+  const ae = _maForm.actEnd   === null ? -1 : Math.max(_maForm.actStart ?? 0, _maForm.actEnd);
+
+  // Header row: empty label + 12 month headers
+  let hdrHtml = '<div class="ma-row-lbl"></div>';
+  for (let m = 1; m <= 12; m++) {
+    hdrHtml += `<div class="ma-month-hdr">${MONTH_KR[m-1]}</div>`;
+  }
+
+  // Plan row
+  let planHtml = '<div class="ma-row-lbl plan-lbl">계획</div>';
+  for (let m = 1; m <= 12; m++) {
+    const enabled = enabledSet.has(m);
+    const inRange = enabled && m >= ps && m <= pe;
+    const mv = _maForm.mmVals[m] ?? 1.0;
+    let barStyle = '', valHtml = '';
+    if (inRange && pj) {
+      if (mv > 0) {
+        barStyle = ` style="background:${_bulkBarColor(pj.color, mv)}"`;
+        const tc = mv <= 0.25 ? 'rgba(0,0,0,.5)' : '#fff';
+        valHtml = `<span class="bulk-val" style="color:${tc}">${mv === 1 ? '1.0' : mv}</span>`;
+      } else {
+        barStyle = ` style="background:transparent;border:1px dashed var(--border)"`;
+        valHtml = `<span style="font-size:9px;color:var(--text-m)">—</span>`;
+      }
+    }
+    planHtml += `<div class="bulk-mcell ma-plan-cell${inRange?' selected':''}${!enabled?' plan-off':''}" data-row="plan" data-m="${m}" data-en="${enabled?1:0}">
+      <div class="bulk-bar"${barStyle}>${valHtml}</div>
+    </div>`;
+  }
+
+  // Actual row
+  let actHtml = '<div class="ma-row-lbl act-lbl">실제</div>';
+  for (let m = 1; m <= 12; m++) {
+    const inActRange = m >= as && m <= ae;
+    const av = _maForm.actualVals[m] || 0;
+    let barStyle = '', valHtml = '';
+    if (av > 0 && pj) {
+      barStyle = ` style="background:${_hexRgba(pj.color, 0.7)}"`;
+      const tc = av <= 0.25 ? 'rgba(0,0,0,.5)' : '#fff';
+      valHtml = `<span class="bulk-val" style="color:${tc}">${av === 1 ? '1.0' : av}</span>`;
+    } else if (inActRange && pj) {
+      barStyle = ` style="background:transparent;border:1px dashed var(--border)"`;
+      valHtml = `<span style="font-size:9px;color:var(--text-m)">—</span>`;
+    }
+    actHtml += `<div class="bulk-mcell ma-act-cell${inActRange?' act-selected':''}" data-row="act" data-m="${m}">
+      <div class="bulk-bar"${barStyle}>${valHtml}</div>
+    </div>`;
+  }
+
+  const trackEl = document.getElementById('maFTrack');
+  if (!trackEl) return;
+  trackEl.innerHTML = `<div class="ma-track-grid" style="width:100%;box-sizing:border-box">${hdrHtml}${planHtml}${actHtml}</div>`;
+
+  // Hint
+  const fmt = v => (Math.round(v*100)/100).toString().replace(/\.?0+$/,'')||'0';
+  let hint = pj ? '계획: 드래그로 기간 선택 · 스크롤로 값 조정 | 실제: 드래그 후 스크롤' : '프로젝트를 먼저 선택하세요';
+  if (pj && _maForm.start !== null) {
+    let planTotal = 0, actTotal = 0;
+    for (let m = ps; m <= pe; m++) if (enabledSet.has(m)) planTotal += _maForm.mmVals[m] ?? 1;
+    for (let m = 1; m <= 12; m++) actTotal += _maForm.actualVals[m] || 0;
+    hint = `계획 ${ps}월~${pe}월 · ${fmt(planTotal)} M/M` + (actTotal > 0 ? ` · 실제 합계 ${fmt(actTotal)} M/M` : '');
+  }
+  const hintEl = document.getElementById('maFHint');
+  if (hintEl) hintEl.textContent = hint;
+}
+
+function _loadMAFormExisting() {
+  const memberId  = document.getElementById('maFMember')?.value;
+  const projectId = document.getElementById('maFProject')?.value;
+  _maForm.start = null; _maForm.end = null; _maForm.mmVals = {}; _maForm.actualVals = {};
+  _maForm.actStart = null; _maForm.actEnd = null;
+  state.formMode.id = projectId || null;
+  if (!memberId || !projectId) return;
+  const existAs = DATA.assignments.filter(a =>
+    a.memberId === memberId && a.projectId === projectId && a.year === state.year);
+  existAs.forEach(a => {
+    _maForm.mmVals[a.month]     = a.mm_plan != null ? a.mm_plan : (a.mm || 0);
+    _maForm.actualVals[a.month] = a.mm_actual || 0;
+  });
+  if (existAs.length) {
+    const months = existAs.map(a => a.month);
+    _maForm.start = Math.min(...months);
+    _maForm.end   = Math.max(...months);
+    const actMonths = existAs.filter(a => (a.mm_actual||0) > 0).map(a => a.month);
+    if (actMonths.length) {
+      _maForm.actStart = Math.min(...actMonths);
+      _maForm.actEnd   = Math.max(...actMonths);
+    }
+  }
+  // show/hide delete button
+  const formDeleteBtn = document.getElementById('formDeleteBtn');
+  if (existAs.length > 0) { formDeleteBtn.classList.remove('hidden'); formDeleteBtn.style.display = ''; }
+  else { formDeleteBtn.classList.add('hidden'); }
+}
+
+function openMemberAssignForm(projectId, memberId) {
+  state.formMode = {type:'memberAssign', id: projectId||null, editMemberId: memberId||null};
+  document.getElementById('formTitle').textContent = '멤버 투입';
   document.getElementById('formDeleteBtn').classList.add('hidden');
+
+  _maForm.start = null; _maForm.end = null; _maForm.mmVals = {}; _maForm.actualVals = {};
+  _maForm.actStart = null; _maForm.actEnd = null;
 
   const memberOpts = DATA.members.map(m =>
     `<option value="${m.id}">${m.name} (${m.role})</option>`).join('');
-
-  // Existing assignments for this member+project+year (for edit mode)
-  let existingMMs = {};
-  let existingTypes = {};
-  let existingType = '상주';
-  if (editMemberId) {
-    const existAs = DATA.assignments.filter(a =>
-      a.memberId === editMemberId && a.projectId === projectId && a.year === state.year);
-    existAs.forEach(a => { existingMMs[a.month] = a.mm; existingTypes[a.month] = a.type; });
-    if (existAs.length) existingType = existAs[0].type;
-  }
-
-  // Parse project start/end to suggest month range
-  const [pStartY, pStartM] = (pj?.start||`${state.year}-01`).split('-').map(Number);
-  const [pEndY,   pEndM  ] = (pj?.end  ||`${state.year}-12`).split('-').map(Number);
-  let defStart = pStartY === state.year ? pStartM : (pEndY === state.year ? 1 : 1);
-  let defEnd   = pEndY   === state.year ? pEndM   : (pStartY === state.year ? 12 : 12);
-  // In edit mode, use actual assignment range
-  if (editMemberId && Object.keys(existingMMs).length) {
-    const months = Object.keys(existingMMs).map(Number);
-    defStart = Math.min(...months);
-    defEnd   = Math.max(...months);
-  }
-
-  const monthOpts = Array.from({length:12},(_,i) =>
-    `<option value="${i+1}">${i+1}월</option>`).join('');
+  const projOpts = `<option value="">프로젝트 선택</option>` +
+    DATA.projects.map(p =>
+      `<option value="${p.id}"${p.id===projectId?' selected':''}>${esc(p.name)} (${esc(p.client)})</option>`
+    ).join('');
 
   document.getElementById('formContent').innerHTML = `
-    <div class="form-group">
-      <label class="form-label">멤버</label>
-      <select class="form-select" id="maFMember">${memberOpts}</select>
-    </div>
     <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">시작 월</label>
-        <select class="form-select" id="maFStart">${monthOpts}</select>
+      <div class="form-group" style="flex:1">
+        <label class="form-label">멤버</label>
+        <select class="form-select" id="maFMember">${memberOpts}</select>
       </div>
-      <div class="form-group">
-        <label class="form-label">종료 월</label>
-        <select class="form-select" id="maFEnd">${monthOpts}</select>
+      <div class="form-group" style="flex:1.6">
+        <label class="form-label">프로젝트</label>
+        <select class="form-select" id="maFProject">${projOpts}</select>
+      </div>
+    </div>
+    <div class="form-group" style="margin-bottom:8px">
+      <label class="form-label">유형</label>
+      <div style="display:flex;gap:12px;align-items:center;padding-top:2px">
+        <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
+          <input type="radio" name="maFType" value="상주" checked> 상주
+        </label>
+        <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
+          <input type="radio" name="maFType" value="비상주"> 비상주
+        </label>
       </div>
     </div>
     <div class="form-group" style="margin-bottom:4px">
-      <label class="form-label">유형 <span style="color:var(--text-m);font-size:10px;font-weight:400">— 일괄 적용</span></label>
-      <div style="display:flex;gap:8px;padding-top:2px;align-items:center">
-        <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
-          <input type="radio" name="maFType" value="상주" ${existingType==='상주'?'checked':''}> 상주
-        </label>
-        <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
-          <input type="radio" name="maFType" value="비상주" ${existingType==='비상주'?'checked':''}> 비상주
-        </label>
-        <button class="ma-bulk-btn" id="maTypeBulkBtn" style="margin-left:4px">적용</button>
-      </div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">월별 M/M</label>
-      <div class="ma-bulk-row">
-        <span class="ma-bulk-label">일괄:</span>
-        <button class="ma-bulk-qbtn" data-bulk="1.0">1</button>
-        <button class="ma-bulk-qbtn" data-bulk="0.75">0.75</button>
-        <button class="ma-bulk-qbtn" data-bulk="0.5">0.5</button>
-        <button class="ma-bulk-qbtn" data-bulk="0.25">0.25</button>
-        <input class="ma-bulk-input" id="maBulkVal" type="number" min="0.05" max="2" step="0.05" value="1.0">
-        <button class="ma-bulk-btn" id="maBulkBtn">적용</button>
-      </div>
-      <div class="ma-month-grid" id="maMonthGrid"></div>
+      <label class="form-label">적용 기간 — 드래그로 범위 선택 · 클릭으로 공수 조정 (0.25/0.5/0.75/1.0)</label>
+      <div id="maFTrack" style="border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:6px;padding:4px"></div>
+      <div class="bulk-hint" id="maFHint">프로젝트를 먼저 선택하세요</div>
     </div>`;
 
-  const startSel = document.getElementById('maFStart');
-  const endSel   = document.getElementById('maFEnd');
-  startSel.value = defStart;
-  endSel.value   = defEnd;
-  if (editMemberId) document.getElementById('maFMember').value = editMemberId;
+  if (memberId) document.getElementById('maFMember').value = memberId;
 
-  if (editMemberId) {
-    const formDeleteBtn = document.getElementById('formDeleteBtn');
-    formDeleteBtn.classList.remove('hidden');
-    formDeleteBtn.style.display = '';
-  }
+  // Member / Project change → reload existing data
+  document.getElementById('maFMember').addEventListener('change', () => { _loadMAFormExisting(); renderMAFormTrack(); });
+  document.getElementById('maFProject').addEventListener('change', () => { _loadMAFormExisting(); renderMAFormTrack(); });
 
-  function refreshGrid() {
-    const s = parseInt(startSel.value);
-    const e = parseInt(endSel.value);
-    if (e < s) { endSel.value = s; }
-    const start = parseInt(startSel.value);
-    const end   = parseInt(endSel.value);
-    const grid  = document.getElementById('maMonthGrid');
-    if (!grid) return;
-    // Preserve existing values
-    const existing = {};
-    grid.querySelectorAll('.ma-month-input').forEach(inp => {
-      existing[inp.dataset.month] = inp.value;
-    });
-    grid.innerHTML = Array.from({length: end - start + 1}, (_, i) => {
-      const m = start + i;
-      const val = existing[m] || (existingMMs[m] != null ? existingMMs[m] : '1.0');
-      const fv = parseFloat(val);
-      const a1 = fv===1.0?'active':'', a15 = fv===0.75?'active':'', a2 = fv===0.5?'active':'', a3 = fv===0.25?'active':'';
-      const existT = existingTypes[m] || '상주';
-      const tA = existT==='상주'?'active':'', tB = existT==='비상주'?'active':'';
-      return `<div class="ma-month-cell">
-        <div class="ma-month-label">${m}월</div>
-        <div class="ma-mm-btns">
-          <button class="ma-mm-btn ${a1}" data-cell="${m}" data-val="1.0">1</button>
-          <button class="ma-mm-btn ${a15}" data-cell="${m}" data-val="0.75">0.75</button>
-          <button class="ma-mm-btn ${a2}" data-cell="${m}" data-val="0.5">0.5</button>
-          <button class="ma-mm-btn ${a3}" data-cell="${m}" data-val="0.25">0.25</button>
-        </div>
-        <input class="ma-month-input" type="number" min="0.05" max="2" step="0.05" value="${val}" data-month="${m}" data-year="${state.year}"
-          oninput="this.closest('.ma-month-cell')?.querySelectorAll('.ma-mm-btn').forEach(b=>b.classList.toggle('active', parseFloat(b.dataset.val)===parseFloat(this.value)))">
-        <div class="ma-type-btns">
-          <button class="ma-type-btn ${tA}" data-cell="${m}" data-type="상주">상주</button>
-          <button class="ma-type-btn ${tB}" data-cell="${m}" data-type="비상주">비상주</button>
-        </div>
-        <input type="hidden" class="ma-month-type" data-month="${m}" value="${existT}">
-      </div>`;
-    }).join('');
+  // If both member + project already known, load now
+  if (memberId && projectId) { _loadMAFormExisting(); }
 
-  }
-
-  startSel.addEventListener('change', refreshGrid);
-  endSel.addEventListener('change', refreshGrid);
-
-  // Single delegated listener on grid (grid element persists across refreshGrid calls)
-  document.getElementById('maMonthGrid').addEventListener('click', ev => {
-    const g = document.getElementById('maMonthGrid');
-    const mmBtn = ev.target.closest('.ma-mm-btn[data-cell]');
-    if (mmBtn) {
-      const m = mmBtn.dataset.cell;
-      const inp = g.querySelector(`.ma-month-input[data-month="${m}"]`);
-      if (inp) inp.value = mmBtn.dataset.val;
-      g.querySelectorAll(`.ma-mm-btn[data-cell="${m}"]`).forEach(b =>
-        b.classList.toggle('active', b === mmBtn));
-      return;
-    }
-    const typeBtn = ev.target.closest('.ma-type-btn[data-cell]');
-    if (typeBtn) {
-      const m = typeBtn.dataset.cell;
-      const t = typeBtn.dataset.type;
-      const hidden = g.querySelector(`.ma-month-type[data-month="${m}"]`);
-      if (hidden) hidden.value = t;
-      g.querySelectorAll(`.ma-type-btn[data-cell="${m}"]`).forEach(b =>
-        b.classList.toggle('active', b === typeBtn));
+  // Wire drag events on track
+  const trackEl = document.getElementById('maFTrack');
+  trackEl.addEventListener('mousedown', ev => {
+    const c = ev.target.closest('.bulk-mcell');
+    if (!c) return;
+    const row = c.dataset.row;
+    if (row === 'plan') {
+      if (c.dataset.en !== '1') return;
+      _maForm.dragging = true; _maForm.dragMoved = false;
+      _maForm.start = +c.dataset.m; _maForm.end = +c.dataset.m;
+    } else if (row === 'act') {
+      _maForm.actDragging = true; _maForm.actDragMoved = false;
+      _maForm.actStart = +c.dataset.m; _maForm.actEnd = +c.dataset.m;
     }
   });
-
-  document.getElementById('maBulkBtn').addEventListener('click', () => {
-    const v = parseFloat(document.getElementById('maBulkVal').value) || 1.0;
-    document.querySelectorAll('.ma-month-input').forEach(inp => { inp.value = v.toFixed(2).replace(/\.?0+$/,'') || v; });
-    document.querySelectorAll('.ma-mm-btn[data-cell]').forEach(btn => {
-      btn.classList.toggle('active', parseFloat(btn.dataset.val) === v);
-    });
+  trackEl.addEventListener('mouseover', ev => {
+    const c = ev.target.closest('.bulk-mcell');
+    if (!c) return;
+    const m = +c.dataset.m;
+    if (_maForm.dragging && c.dataset.row === 'plan' && c.dataset.en === '1') {
+      if (m !== _maForm.end) { _maForm.dragMoved = true; _maForm.end = m; renderMAFormTrack(); }
+    }
+    if (_maForm.actDragging && c.dataset.row === 'act') {
+      if (m !== _maForm.actEnd) {
+        _maForm.actDragMoved = true; _maForm.actEnd = m;
+        // fill newly-entered cells with default
+        const as2 = Math.min(_maForm.actStart, m), ae2 = Math.max(_maForm.actStart, m);
+        for (let mi = as2; mi <= ae2; mi++) {
+          if (!(_maForm.actualVals[mi] > 0)) _maForm.actualVals[mi] = 1.0;
+        }
+        renderMAFormTrack();
+      }
+    }
   });
+  trackEl.addEventListener('wheel', ev => {
+    ev.preventDefault();
+    const c = ev.target.closest('.bulk-mcell');
+    if (!c) return;
+    const m = +c.dataset.m;
+    const dir = ev.deltaY < 0 ? 1 : -1;
+    if (c.dataset.row === 'plan' && c.classList.contains('selected')) {
+      const cur = _maForm.mmVals[m] ?? 1.0;
+      const idx = MM_CYCLE_BULK.indexOf(cur);
+      _maForm.mmVals[m] = MM_CYCLE_BULK[(idx + dir + MM_CYCLE_BULK.length) % MM_CYCLE_BULK.length];
+    } else if (c.dataset.row === 'act') {
+      const cur = _maForm.actualVals[m] || 0;
+      const idx = MM_CYCLE_BULK.indexOf(cur);
+      _maForm.actualVals[m] = MM_CYCLE_BULK[Math.max(0, (idx + dir + MM_CYCLE_BULK.length) % MM_CYCLE_BULK.length)];
+    }
+    renderMAFormTrack();
+  }, {passive: false});
 
-  document.getElementById('maTypeBulkBtn').addEventListener('click', () => {
-    const t = document.querySelector('input[name="maFType"]:checked')?.value || '상주';
-    document.querySelectorAll('.ma-month-type').forEach(inp => { inp.value = t; });
-    document.querySelectorAll('.ma-type-btn[data-cell]').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.type === t);
-    });
-  });
-
-  // Bulk quick buttons
-  document.querySelectorAll('.ma-bulk-qbtn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const v = parseFloat(btn.dataset.bulk);
-      document.getElementById('maBulkVal').value = v;
-      document.querySelectorAll('.ma-month-input').forEach(inp => { inp.value = v; });
-      document.querySelectorAll('.ma-mm-btn[data-cell]').forEach(b => {
-        b.classList.toggle('active', parseFloat(b.dataset.val) === v);
-      });
-    });
-  });
-
-  refreshGrid();
+  renderMAFormTrack();
   document.getElementById('formModal').classList.remove('hidden');
 }
 
 function saveMemberAssignForm() {
   const memberId  = document.getElementById('maFMember')?.value;
-  const startM    = parseInt(document.getElementById('maFStart')?.value);
-  const endM      = parseInt(document.getElementById('maFEnd')?.value);
-  const projectId = state.formMode?.id;
-  if (!memberId || !projectId) return;
+  const projectId = document.getElementById('maFProject')?.value || state.formMode?.id;
+  if (!memberId || !projectId || _maForm.start === null) return;
+
   const year = state.year;
-  document.querySelectorAll('.ma-month-input').forEach(inp => {
-    const month = parseInt(inp.dataset.month);
-    const mm    = parseFloat(inp.value);
-    if (isNaN(mm) || mm <= 0) return;
-    const typeInp = document.querySelector(`.ma-month-type[data-month="${month}"]`);
-    const type = typeInp?.value || '상주';
-    DataAPI.setAssignment(memberId, projectId, year, month, mm, type);
-  });
+  const type = document.querySelector('input[name="maFType"]:checked')?.value || '상주';
+  const pj   = getProject(projectId);
+
+  const enabledSet = new Set();
+  if (pj?.start && pj?.end) {
+    const [sy, sm] = pj.start.split('-').map(Number);
+    const [ey, em] = pj.end.split('-').map(Number);
+    for (let m = 1; m <= 12; m++) {
+      if (year*12+m >= sy*12+sm && year*12+m <= ey*12+em) enabledSet.add(m);
+    }
+  } else {
+    for (let m = 1; m <= 12; m++) enabledSet.add(m);
+  }
+
+  const s = _maForm.start === null ? null : Math.min(_maForm.start, _maForm.end ?? _maForm.start);
+  const e = _maForm.end   === null ? null : Math.max(_maForm.start ?? 0, _maForm.end);
+
+  // Save plan range months
+  if (s !== null) {
+    for (let m = s; m <= e; m++) {
+      if (!enabledSet.has(m)) continue;
+      const mm_plan = _maForm.mmVals[m] ?? 1.0;
+      // 실제값이 별도 입력된 경우 우선, 없으면 계획과 동일하게 자동 등록 (계획 0은 예외)
+      const mm_actual = _maForm.actualVals[m] > 0 ? _maForm.actualVals[m] : (mm_plan > 0 ? mm_plan : 0);
+      DataAPI.setAssignment(memberId, projectId, year, m, mm_plan, mm_actual, type);
+    }
+  }
+  // Save actual-only months outside plan range
+  for (let m = 1; m <= 12; m++) {
+    const inPlan = s !== null && enabledSet.has(m) && m >= s && m <= e;
+    if (inPlan) continue;
+    const mm_actual = _maForm.actualVals[m] || 0;
+    if (mm_actual > 0) {
+      const ex = DATA.assignments.find(a => a.memberId===memberId && a.projectId===projectId && a.year===year && a.month===m);
+      DataAPI.setAssignment(memberId, projectId, year, m, ex ? (ex.mm_plan ?? ex.mm ?? 0) : 0, mm_actual, type);
+    }
+  }
   closeFormModal();
   render();
 }
@@ -1170,8 +1297,8 @@ function saveMemberAssignForm() {
 // ═══════════════════════════════════════════════════════════
 // BULK ASSIGN MODAL
 // ═══════════════════════════════════════════════════════════
-const MM_CYCLE_BULK = [0.25, 0.5, 0.75, 1.0];
-const MM_ALPHA_BULK = {0.25: 0.38, 0.5: 0.58, 0.75: 0.78, 1.0: 1.0};
+const MM_CYCLE_BULK = [0, 0.25, 0.5, 0.75, 1.0];
+const MM_ALPHA_BULK = {0: 0, 0.25: 0.38, 0.5: 0.58, 0.75: 0.78, 1.0: 1.0};
 
 function _bulkBarColor(hex, mv) {
   const a = MM_ALPHA_BULK[mv] ?? 1;
@@ -1281,7 +1408,10 @@ function renderBulkModal() {
 function saveBulkModal() {
   if (!_bulk.projId || _bulk.start === null) return;
   const mn = Math.min(_bulk.start, _bulk.end??_bulk.start), mx = Math.max(_bulk.start, _bulk.end??_bulk.start);
-  for (let m = mn; m <= mx; m++) DataAPI.setAssignment(_bulk.memberId, _bulk.projId, state.year, m, _bulk.mmVals[m]??1.0, '상주');
+  for (let m = mn; m <= mx; m++) {
+    const existing = DATA.assignments.find(a => a.memberId===_bulk.memberId && a.projectId===_bulk.projId && a.year===state.year && a.month===m);
+    DataAPI.setAssignment(_bulk.memberId, _bulk.projId, state.year, m, _bulk.mmVals[m]??1.0, existing?.mm_actual||0, '상주');
+  }
   document.getElementById('bulkModal').classList.add('hidden');
   render();
 }
@@ -1301,7 +1431,7 @@ function openAssignModal(memberId, year, month) {
 function renderAssignModal() {
   const { memberId, year, month } = state.assignCtx;
   const as = getAssignments(memberId, year, month);
-  const total = as.reduce((s,a)=>s+a.mm, 0);
+  const total = as.reduce((s,a)=>s+getDisplayMM(a), 0);
 
   // Current assignments list
   let listHtml = '';
@@ -1309,11 +1439,18 @@ function renderAssignModal() {
     listHtml = as.map(a => {
       const pj = getProject(a.projectId);
       if (!pj) return '';
+      const _mp = a.mm_plan != null ? a.mm_plan : (a.mm || 0);
+      const _ma = a.mm_actual || 0;
+      const mmInfo = state.assignMode === 'plan'
+        ? `<b style="font-family:'JetBrains Mono',monospace">${_mp.toFixed(2)} M/M</b> <span style="font-size:10px;color:var(--text-m)">(계획)</span>`
+        : state.assignMode === 'actual'
+          ? `<b style="font-family:'JetBrains Mono',monospace">${_ma > 0 ? _ma.toFixed(2) : _mp.toFixed(2)} M/M</b>${_ma > 0 ? '' : ' <span style="font-size:10px;color:var(--text-m)">(계획)</span>'}`
+          : `<span style="font-size:10px;color:var(--text-m)">계획</span> <b style="font-family:'JetBrains Mono',monospace">${_mp.toFixed(2)}</b> <span style="font-size:10px">→</span> <span style="font-size:10px;color:var(--text-m)">실제</span> <b style="font-family:'JetBrains Mono',monospace;color:${_ma>_mp+0.05?'#c62828':_ma>0?'var(--ok)':'var(--text-s)'}">${_ma > 0 ? _ma.toFixed(2) : '—'}</b>`;
       return `<div class="assign-item">
         <div class="assign-item-dot" style="background:${pj.color}"></div>
         <div style="flex:1">
           <div class="assign-item-name">${esc(pj.name)}</div>
-          <div class="assign-item-info">${esc(pj.client)} · ${esc(a.type)} · <b style="font-family:'JetBrains Mono',monospace">${a.mm.toFixed(2)} M/M</b></div>
+          <div class="assign-item-info">${esc(pj.client)} · ${esc(a.type)} · ${mmInfo}</div>
         </div>
         <button class="btn-icon-sm" data-assign-edit="${a.projectId}" title="수정">✏</button>
         <button class="btn-icon-sm danger" data-assign-del="${a.projectId}" title="삭제">✕</button>
@@ -1342,7 +1479,7 @@ function renderAssignModal() {
     </div>
     <div class="form-row">
       <div class="form-group" style="margin-bottom:0">
-        <label class="form-label">M/M</label>
+        <label class="form-label">계획 M/M</label>
         <div style="display:flex;gap:4px;align-items:center">
           <button class="ma-mm-btn" data-amm="1.0">1</button>
           <button class="ma-mm-btn" data-amm="0.75">0.75</button>
@@ -1352,11 +1489,15 @@ function renderAssignModal() {
         </div>
       </div>
       <div class="form-group" style="margin-bottom:0">
-        <label class="form-label">유형</label>
-        <div class="form-radio-group" style="height:36px">
-          <label class="form-radio-label"><input type="radio" name="assignType" value="상주" checked> 상주</label>
-          <label class="form-radio-label"><input type="radio" name="assignType" value="비상주"> 비상주</label>
-        </div>
+        <label class="form-label">실제 M/M <span style="color:var(--text-m);font-size:10px">(선택)</span></label>
+        <input class="ma-bulk-input" type="number" min="0" max="2" step="0.05" value="" placeholder="0.00" id="newAssignMMActual" style="width:100%">
+      </div>
+    </div>
+    <div class="form-group" style="margin-bottom:0;margin-top:6px">
+      <label class="form-label">유형</label>
+      <div class="form-radio-group" style="height:36px">
+        <label class="form-radio-label"><input type="radio" name="assignType" value="상주" checked> 상주</label>
+        <label class="form-radio-label"><input type="radio" name="assignType" value="비상주"> 비상주</label>
       </div>
     </div>
     <div style="display:flex;justify-content:flex-end;margin-top:12px">
@@ -1377,10 +1518,11 @@ function renderAssignModal() {
 
   // Save new
   document.getElementById('saveNewAssign').onclick = () => {
-    const pid  = document.getElementById('newAssignProject').value;
-    const mm   = parseFloat(document.getElementById('newAssignMM').value) || 1.0;
-    const type = document.querySelector('input[name="assignType"]:checked').value;
-    DataAPI.setAssignment(memberId, pid, year, month, mm, type);
+    const pid      = document.getElementById('newAssignProject').value;
+    const mm_plan  = parseFloat(document.getElementById('newAssignMM').value) || 1.0;
+    const mm_actual = parseFloat(document.getElementById('newAssignMMActual').value) || 0;
+    const type     = document.querySelector('input[name="assignType"]:checked').value;
+    DataAPI.setAssignment(memberId, pid, year, month, mm_plan, mm_actual, type);
     renderAssignModal();
     render();
   };
@@ -1391,10 +1533,13 @@ function renderAssignModal() {
       const pid = btn.dataset.assignEdit;
       const existing = as.find(a=>a.projectId===pid);
       if (!existing) return;
+      const _mp = existing.mm_plan != null ? existing.mm_plan : (existing.mm || 0);
+      const _ma = existing.mm_actual || 0;
       document.getElementById('newAssignProject').value = pid;
-      document.getElementById('newAssignMM').value = existing.mm;
+      document.getElementById('newAssignMM').value = _mp;
+      document.getElementById('newAssignMMActual').value = _ma > 0 ? _ma : '';
       document.getElementById('assignBody').querySelectorAll('[data-amm]').forEach(b =>
-        b.classList.toggle('active', parseFloat(b.dataset.amm) === existing.mm));
+        b.classList.toggle('active', parseFloat(b.dataset.amm) === _mp));
       document.querySelector(`input[name="assignType"][value="${existing.type}"]`).checked = true;
     };
   });
@@ -1475,7 +1620,10 @@ function switchView(mode) {
 function render() {
   renderHeaderControls();
   if (state.viewMode==='bench')   renderBenchView();
-  else if (state.viewMode==='wisenm') renderWisenmView();
+  else if (state.viewMode==='wisenm') {
+    document.getElementById('kpi-wrap').innerHTML = '';
+    renderWisenmView();
+  }
   else                            renderYearView();
 }
 
@@ -1594,6 +1742,23 @@ document.addEventListener('click', e => {
   }
 });
 
+// Assign mode segment
+document.getElementById('assignModeSeg').addEventListener('click', e => {
+  const btn = e.target.closest('.amseg-btn[data-amode]');
+  if (!btn) return;
+  state.assignMode = btn.dataset.amode;
+  document.querySelectorAll('.amseg-btn').forEach(b => b.classList.toggle('active', b === btn));
+  try { localStorage.setItem('wfm_assignMode', state.assignMode); } catch(e){}
+  render();
+});
+
+// Allowance checkbox
+document.getElementById('showAllowanceCheck').addEventListener('change', function() {
+  state.showAllowance = this.checked;
+  try { localStorage.setItem('wfm_showAllowance', this.checked); } catch(e){}
+  render();
+});
+
 // Checkbox persistence
 (function(){
   const tb = document.getElementById('showTotalBar');
@@ -1601,6 +1766,17 @@ document.addEventListener('click', e => {
   try {
     if (localStorage.getItem('wfm_showTotalBar') === 'false') { tb.checked = false; document.getElementById('grid-container').classList.add('hide-total-bar'); }
     if (localStorage.getItem('wfm_showMonthBg') === 'true') { mb.checked = true; document.getElementById('grid-container').classList.add('show-month-bg'); }
+    // Restore assign mode
+    const savedMode = localStorage.getItem('wfm_assignMode');
+    if (savedMode && ['actual','plan','both'].includes(savedMode)) {
+      state.assignMode = savedMode;
+      document.querySelectorAll('.amseg-btn').forEach(b => b.classList.toggle('active', b.dataset.amode === savedMode));
+    }
+    // Restore allowance toggle
+    if (localStorage.getItem('wfm_showAllowance') === 'true') {
+      state.showAllowance = true;
+      document.getElementById('showAllowanceCheck').checked = true;
+    }
   } catch(e){}
 })();
 document.getElementById('showTotalBar').addEventListener('change', function() {
@@ -1711,10 +1887,23 @@ document.getElementById('grid-container').addEventListener('click', e => {
   const memCell = e.target.closest('.member-cell');
   if (memCell) { e.stopPropagation(); renderMemberPanel(memCell.dataset.member); return; }
 
-  // Assign cell click → assignment modal
+  // Allowance cell click → toggle
+  const allowCell = e.target.closest('.allow-cell[data-allow-member]');
+  if (allowCell) {
+    e.stopPropagation();
+    DataAPI.toggleAllowance(allowCell.dataset.allowMember, state.year, parseInt(allowCell.dataset.allowMonth));
+    render();
+    return;
+  }
+
+  // Assign cell click → unified member assign form
   const assignCell = e.target.closest('.assign-cell');
   if (assignCell) {
-    openAssignModal(assignCell.dataset.member, state.year, parseInt(assignCell.dataset.month));
+    const mid = assignCell.dataset.member;
+    const mo  = parseInt(assignCell.dataset.month);
+    const existAs = getAssignments(mid, state.year, mo);
+    const firstProjId = existAs.length > 0 ? existAs[0].projectId : null;
+    openMemberAssignForm(firstProjId, mid);
   }
 });
 
@@ -1795,11 +1984,14 @@ document.getElementById('formDeleteBtn').onclick = function() {
   confirmable(btn, () => {
     if (state.formMode?.type==='member')  deleteMemberConfirm();
     else if (state.formMode?.type==='project') deleteProjectConfirm();
-    else if (state.formMode?.type==='memberAssign' && state.formMode.editMemberId) {
-      const { editMemberId, id: projectId } = state.formMode;
-      document.querySelectorAll('.ma-month-input').forEach(inp => {
-        DataAPI.deleteAssignment(editMemberId, projectId, parseInt(inp.dataset.year), parseInt(inp.dataset.month));
-      });
+    else if (state.formMode?.type==='memberAssign') {
+      const editMemberId = document.getElementById('maFMember')?.value;
+      const projectId    = document.getElementById('maFProject')?.value || state.formMode?.id;
+      if (editMemberId && projectId) {
+        const s = _maForm.start === null ? 1 : Math.min(_maForm.start, _maForm.end ?? _maForm.start);
+        const e = _maForm.end   === null ? 12 : Math.max(_maForm.start ?? 1, _maForm.end);
+        for (let m = s; m <= e; m++) DataAPI.deleteAssignment(editMemberId, projectId, state.year, m);
+      }
       closeFormModal(); render();
     }
   });
@@ -1812,17 +2004,42 @@ document.getElementById('bulkClose').onclick = () => document.getElementById('bu
 document.getElementById('bulkCancelBtn').onclick = () => document.getElementById('bulkModal').classList.add('hidden');
 document.getElementById('bulkSaveBtn').onclick = saveBulkModal;
 document.addEventListener('mouseup', e => {
-  if (!_bulk.dragging) return;
-  if (!_bulk.dragMoved) {
-    const c = e.target.closest?.('.bulk-mcell');
-    if (c && c.classList.contains('selected')) {
-      const m = +c.dataset.m, cur = _bulk.mmVals[m]??1.0;
-      const idx = MM_CYCLE_BULK.indexOf(cur);
-      _bulk.mmVals[m] = MM_CYCLE_BULK[(idx+1)%MM_CYCLE_BULK.length];
-      renderBulkModal();
+  if (_bulk.dragging) {
+    if (!_bulk.dragMoved) {
+      const c = e.target.closest?.('.bulk-mcell');
+      if (c && c.classList.contains('selected') && c.closest('#bulkTrack')) {
+        const m = +c.dataset.m, cur = _bulk.mmVals[m]??1.0;
+        const idx = MM_CYCLE_BULK.indexOf(cur);
+        _bulk.mmVals[m] = MM_CYCLE_BULK[(idx+1)%MM_CYCLE_BULK.length];
+        renderBulkModal();
+      }
     }
+    _bulk.dragging = false; _bulk.dragMoved = false;
   }
-  _bulk.dragging = false; _bulk.dragMoved = false;
+  if (_maForm.dragging) {
+    if (!_maForm.dragMoved) {
+      const c = e.target.closest?.('.bulk-mcell');
+      if (c && c.classList.contains('selected') && c.dataset.row === 'plan' && c.closest('#maFTrack')) {
+        const m = +c.dataset.m, cur = _maForm.mmVals[m]??1.0;
+        const idx = MM_CYCLE_BULK.indexOf(cur);
+        _maForm.mmVals[m] = MM_CYCLE_BULK[(idx+1)%MM_CYCLE_BULK.length];
+        renderMAFormTrack();
+      }
+    }
+    _maForm.dragging = false; _maForm.dragMoved = false;
+  }
+  if (_maForm.actDragging) {
+    if (!_maForm.actDragMoved) {
+      const c = e.target.closest?.('.bulk-mcell');
+      if (c && c.dataset.row === 'act' && c.closest('#maFTrack')) {
+        const m = +c.dataset.m, cur = _maForm.actualVals[m] || 0;
+        const idx = MM_CYCLE_BULK.indexOf(cur);
+        _maForm.actualVals[m] = MM_CYCLE_BULK[(idx+1)%MM_CYCLE_BULK.length];
+        renderMAFormTrack();
+      }
+    }
+    _maForm.actDragging = false; _maForm.actDragMoved = false;
+  }
 });
 
 // Assign modal
