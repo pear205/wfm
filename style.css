@@ -175,10 +175,8 @@ button{cursor:pointer;border:none;background:none;font-family:inherit}
 .cell-total-bar.is-empty{background:rgba(100,116,139,.13)}
 .proj-bar{height:18px;border-radius:4px;display:flex;align-items:center;padding:0 6px;gap:3px;cursor:pointer;transition:filter .12s;overflow:hidden;position:relative;filter:saturate(72%)}
 /* 비교 모드 — 위=계획(연한), 아래=실제(진한) 두 띠 */
-.proj-bar.proj-bar-both{height:32px;flex-direction:column;padding:0;align-items:stretch;position:relative;overflow:hidden;gap:1px}
-.pb-plan-strip,.pb-act-strip{flex:1;display:flex;align-items:center;padding:0 18px 0 5px;gap:4px}
-.pb-strip-val{font-size:10px;font-weight:600;color:#fff;flex-shrink:0;margin-left:auto}
-.pb-plan-strip .proj-bar-name{font-size:9px;color:#fff;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.proj-bar.proj-bar-both{height:20px;flex-direction:row;padding:0;align-items:center;position:relative;overflow:visible}
+.pb-status-badge{position:absolute;top:-5px;right:-5px;min-width:13px;height:13px;border-radius:7px;border:1.5px solid #fff;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:#fff;z-index:3;padding:0 2px;line-height:1;pointer-events:none}
 .proj-bar:hover{filter:saturate(90%) brightness(1.06)}
 .proj-bar-del{opacity:0;pointer-events:none;position:absolute;right:3px;top:50%;transform:translateY(-50%);width:14px;height:14px;border-radius:3px;background:rgba(0,0,0,.35);color:#fff;font-size:9px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;transition:opacity .1s;user-select:none}
 .proj-bar:hover .proj-bar-del{opacity:1;pointer-events:auto}

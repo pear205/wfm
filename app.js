@@ -257,7 +257,11 @@ function renderYearView() {
       const isCur = year===CUR_YEAR && m===CUR_MONTH;
       const as = getAssignments(mem.id, year, m);
       const sortedAs = [...as].sort((a,b)=>(projLane[a.projectId]??99)-(projLane[b.projectId]??99));
-      const total = sortedAs.reduce((s,a)=>s+a.mm,0);
+      const total = sortedAs.reduce((s,a)=>{
+        const mp = a.mm_plan!=null?a.mm_plan:(a.mm||0);
+        const ma = a.mm_actual||0;
+        return s+(state.assignMode==='act'?ma:mp);
+      },0);
         const cellCls = total>1.05?'is-over':total<0.98&&total>0?'is-warn':'';
       const nextIds = m<12 ? new Set(getAssignments(mem.id,year,m+1).map(a=>a.projectId)) : new Set();
       const prevIds = m>1  ? new Set(getAssignments(mem.id,year,m-1).map(a=>a.projectId)) : new Set();
@@ -266,8 +270,8 @@ function renderYearView() {
       html += `<td class="assign-cell ${cellCls} ${isCur?'today-col':''}" data-member="${mem.id}" data-month="${m}" data-util="${utilAttr}">`;
       html += `<div class="assign-bars">`;
       { const tRL=m===1?4:0, tRR=m===12?4:0;
-        const tBg = total>1.05 ? 'rgba(198,40,40,.75)' : total===0 ? 'rgba(100,116,139,.13)' : 'rgba(100,116,139,.55)';
-        const tColor = total===0 ? 'rgba(100,116,139,.5)' : 'rgba(255,255,255,.9)';
+        const tBg = total>1.05 ? 'rgba(198,40,40,.75)' : 'transparent';
+        const tColor = total===0 ? 'rgba(100,116,139,.35)' : total>1.05 ? 'rgba(255,255,255,.9)' : 'var(--text-m)';
         html += `<div class="cell-total-bar" style="border-radius:${tRL}px ${tRR}px ${tRR}px ${tRL}px;background:${tBg};color:${tColor}">${fmtMM(total)}</div>`; }
       for (let li=0; li<numLanes; li++) {
         const a = sortedAs.find(a2=>projLane[a2.projectId]===li);
@@ -293,25 +297,48 @@ function renderYearView() {
         const _biju = a.type==='비상주'?'biju':'';
 
         if (state.assignMode === 'both') {
-          // 비교 모드: 단일 바, 배경=계획(연한), fill=실제(진한)
-          const actOver = _ma > _mp + 0.05;
-          const actUnder = _ma > 0 && _ma < _mp - 0.05;
-          const actFillColor = actOver ? _hexRgba('#c62828', 0.92) : _hexRgba(pj.color, 0.95);
-          const planBg = _hexRgba(pj.color, 0.9);
-          const fillPct = _mp > 0 ? Math.min(100, (_ma / _mp) * 100) : (_ma > 0 ? 100 : 0);
-          const actBgFull = actOver ? _hexRgba('#c62828', 0.65) : _hexRgba(pj.color, 0.45);
+          // 비교 모드 (B-5a): 그라데이션 단일 바 — 진한(실제)→연한(계획잔여)→회색(빈구간)
+          // 초과 시 색상 변경 없이 흰색+빨강 이중 테두리 + ↑ 뱃지
+          const unplanned = _mp === 0 && _ma > 0;
+          const actOver   = !unplanned && _mp > 0 && _ma > _mp + 0.05;
+          const actPct  = Math.min(100, _ma * 100);
+          const planPct = Math.min(100, _mp * 100);
+          // 스팬 연결 로직:
+          //   cL=false, cR=true  (시작): fill 오른쪽 정렬 — 연한→진한, 다음달 진한 바와 자연 연결
+          //   cL=true,  cR=true  (중간): 꽉 채운 진한 바
+          //   cL=true,  cR=false (끝)  : 정상 왼쪽 정렬 — 진한→연한→회색
+          //   cL=false, cR=false (독립): 정상 왼쪽 정렬
+          let grad;
+          if (cR && !cL) {
+            // 스팬 시작: fill을 오른쪽 정렬 (100-actPct)%까지 연한, 나머지 진한
+            const lightEnd = Math.max(0, 100 - actPct);
+            grad = lightEnd === 0
+              ? `${_hexRgba(pj.color,0.88)}`
+              : `linear-gradient(to right,${_hexRgba(pj.color,0.40)} 0%,${_hexRgba(pj.color,0.40)} ${lightEnd}%,${_hexRgba(pj.color,0.88)} ${lightEnd}%)`;
+          } else if (cR && cL) {
+            // 스팬 중간: 항상 꽉 채운 진한 바
+            grad = `${_hexRgba(pj.color,0.88)}`;
+          } else if (unplanned) {
+            grad = `linear-gradient(to right,${_hexRgba(pj.color,0.88)} ${actPct}%,rgba(100,116,139,0.12) ${actPct}%)`;
+          } else if (actOver) {
+            grad = `linear-gradient(to right,${_hexRgba(pj.color,0.88)} ${planPct}%,${_hexRgba(pj.color,0.70)} ${planPct}%,${_hexRgba(pj.color,0.70)} ${actPct}%,rgba(100,116,139,0.12) ${actPct}%)`;
+          } else {
+            // 스팬 끝 또는 독립: 진한→연한→회색
+            grad = `linear-gradient(to right,${_hexRgba(pj.color,0.88)} ${actPct}%,${_hexRgba(pj.color,0.22)} ${actPct}%,${_hexRgba(pj.color,0.22)} ${planPct}%,rgba(100,116,139,0.12) ${planPct}%)`;
+          }
+          const borderStyle = actOver ? 'box-shadow:0 0 0 1.5px rgba(255,255,255,0.85),0 0 0 3px #EF4444;' : '';
+          const mmLabel = _ma > 0 ? fmtMM(_ma) : '—';
+          const mmSub   = _mp > 0 && _ma > 0 && Math.abs(_mp - _ma) > 0.01 ? `/${fmtMM(_mp)}` : '';
           html += `<div class="proj-bar proj-bar-both ${_biju}"
-            style="border-radius:${rl}px ${rr}px ${rr}px ${rl}px"
+            style="background:${grad};border-radius:${rl}px ${rr}px ${rr}px ${rl}px;${borderStyle}"
             ${_barAttrs}>
-            <div class="pb-plan-strip" style="background:${planBg};border-radius:${rl}px ${rr}px 0 0">
-              ${isFirst ? `<span class="proj-bar-name" style="font-size:9px">${esc(pj.name)}</span>` : '<span></span>'}
-              <span class="pb-strip-val">${fmtMM(_mp)}</span>
+            <div style="position:absolute;inset:0;display:flex;align-items:center;padding:0 22px 0 5px;gap:3px;z-index:2;overflow:hidden">
+              ${isFirst ? `<span class="proj-bar-name" style="color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.3);flex:0;margin-right:3px">${esc(pj.name)}</span>` : ''}
+              <span style="font-size:10px;font-weight:600;color:#fff;flex-shrink:0;text-shadow:0 1px 2px rgba(0,0,0,.35)">${mmLabel}</span>
+              ${mmSub ? `<span style="font-size:8px;color:rgba(255,255,255,.55);flex-shrink:0">${mmSub}</span>` : ''}
             </div>
-            <div class="pb-act-strip" style="background:${actBgFull};border-radius:0 0 ${rr}px ${rl}px">
-              ${isFirst ? '<span></span>' : ''}
-              <span class="pb-strip-val">${_ma > 0 ? fmtMM(_ma) : '—'}</span>
-            </div>
-            <span class="proj-bar-del" data-del-assign='${assignKey}' title="공수 삭제" style="position:absolute;right:4px;top:50%;transform:translateY(-50%)">✕</span>
+            ${(unplanned||actOver) ? `<span class="pb-status-badge" style="background:${actOver?'#EF4444':'#EF4444'}">${actOver?'↑':'!'}</span>` : ''}
+            <span class="proj-bar-del" data-del-assign='${assignKey}' title="공수 삭제">✕</span>
           </div>`;
         } else {
           let _barBg, _mmDisp;
