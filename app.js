@@ -1057,16 +1057,7 @@ function renderMAFormTrack() {
   const pj = getProject(projectId);
   const year = state.year;
 
-  const enabledSet = new Set();
-  if (pj?.start && pj?.end) {
-    const [sy, sm] = pj.start.split('-').map(Number);
-    const [ey, em] = pj.end.split('-').map(Number);
-    for (let m = 1; m <= 12; m++) {
-      if (year*12+m >= sy*12+sm && year*12+m <= ey*12+em) enabledSet.add(m);
-    }
-  } else {
-    for (let m = 1; m <= 12; m++) enabledSet.add(m);
-  }
+  const enabledSet = new Set([1,2,3,4,5,6,7,8,9,10,11,12]);
 
   const ps = _maForm.start === null ? 99 : Math.min(_maForm.start, _maForm.end ?? _maForm.start);
   const pe = _maForm.end   === null ? -1 : Math.max(_maForm.start ?? 0, _maForm.end);
@@ -1227,7 +1218,7 @@ function openMemberAssignForm(projectId, memberId) {
     if (row === 'plan') {
       if (c.dataset.en !== '1') return;
       _maForm.dragging = true; _maForm.dragMoved = false;
-      _maForm.start = +c.dataset.m; _maForm.end = +c.dataset.m;
+      _maForm.dragAnchor = +c.dataset.m;
     } else if (row === 'act') {
       _maForm.actDragging = true; _maForm.actDragMoved = false;
       _maForm.actStart = +c.dataset.m; _maForm.actEnd = +c.dataset.m;
@@ -1238,7 +1229,10 @@ function openMemberAssignForm(projectId, memberId) {
     if (!c) return;
     const m = +c.dataset.m;
     if (_maForm.dragging && c.dataset.row === 'plan' && c.dataset.en === '1') {
-      if (m !== _maForm.end) { _maForm.dragMoved = true; _maForm.end = m; renderMAFormTrack(); }
+      if (m !== _maForm.end || (_maForm.dragAnchor != null && m !== _maForm.dragAnchor && !_maForm.dragMoved)) {
+        if (!_maForm.dragMoved && _maForm.dragAnchor != null) _maForm.start = _maForm.dragAnchor;
+        _maForm.dragMoved = true; _maForm.end = m; renderMAFormTrack();
+      }
     }
     if (_maForm.actDragging && c.dataset.row === 'act') {
       if (m !== _maForm.actEnd) {
@@ -1283,16 +1277,7 @@ function saveMemberAssignForm() {
   const type = document.querySelector('input[name="maFType"]:checked')?.value || '상주';
   const pj   = getProject(projectId);
 
-  const enabledSet = new Set();
-  if (pj?.start && pj?.end) {
-    const [sy, sm] = pj.start.split('-').map(Number);
-    const [ey, em] = pj.end.split('-').map(Number);
-    for (let m = 1; m <= 12; m++) {
-      if (year*12+m >= sy*12+sm && year*12+m <= ey*12+em) enabledSet.add(m);
-    }
-  } else {
-    for (let m = 1; m <= 12; m++) enabledSet.add(m);
-  }
+  const enabledSet = new Set([1,2,3,4,5,6,7,8,9,10,11,12]);
 
   const s = _maForm.start === null ? null : Math.min(_maForm.start, _maForm.end ?? _maForm.start);
   const e = _maForm.end   === null ? null : Math.max(_maForm.start ?? 0, _maForm.end);
@@ -1303,7 +1288,8 @@ function saveMemberAssignForm() {
       if (!enabledSet.has(m)) continue;
       const mm_plan = _maForm.mmVals[m] ?? 1.0;
       // 실제값이 별도 입력된 경우 우선, 없으면 계획과 동일하게 자동 등록 (계획 0은 예외)
-      const mm_actual = _maForm.actualVals[m] > 0 ? _maForm.actualVals[m] : (mm_plan > 0 ? mm_plan : 0);
+      const exA = DATA.assignments.find(a => a.memberId===memberId && a.projectId===projectId && a.year===year && a.month===m);
+      const mm_actual = _maForm.actualVals[m] > 0 ? _maForm.actualVals[m] : (exA ? 0 : (mm_plan > 0 ? mm_plan : 0));
       DataAPI.setAssignment(memberId, projectId, year, m, mm_plan, mm_actual, type);
     }
   }
@@ -2051,9 +2037,18 @@ document.addEventListener('mouseup', e => {
         const idx = MM_CYCLE_BULK.indexOf(cur);
         _maForm.mmVals[m] = MM_CYCLE_BULK[(idx+1)%MM_CYCLE_BULK.length];
         renderMAFormTrack();
+      } else if (c && c.dataset.row === 'plan' && c.dataset.en === '1' && c.closest('#maFTrack')) {
+        const m = +c.dataset.m;
+        if (_maForm.start === null) { _maForm.start = m; _maForm.end = m; }
+        else {
+          const lo = Math.min(_maForm.start, _maForm.end ?? _maForm.start), hi = Math.max(_maForm.start, _maForm.end ?? _maForm.start);
+          _maForm.start = Math.min(lo, m); _maForm.end = Math.max(hi, m);
+        }
+        for (let mi = _maForm.start; mi <= _maForm.end; mi++) if (_maForm.mmVals[mi] == null) _maForm.mmVals[mi] = 1.0;
+        renderMAFormTrack();
       }
     }
-    _maForm.dragging = false; _maForm.dragMoved = false;
+    _maForm.dragging = false; _maForm.dragMoved = false; _maForm.dragAnchor = null;
   }
   if (_maForm.actDragging) {
     if (!_maForm.actDragMoved) {
