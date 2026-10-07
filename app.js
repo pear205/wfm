@@ -1731,8 +1731,29 @@ function switchView(mode) {
   render();
 }
 
+// 조회 실패 또는 데이터 없음 상태를 표 대신 보여준다. 화면을 대신했으면 true
+function renderDataGate() {
+  const failed = LOAD.status === 'error';
+  if (!failed && DATA.members.length > 0) return false;
+  document.getElementById('kpi-wrap').innerHTML = '';
+  const detail = failed
+    ? `<p>다음 데이터를 불러오지 못했습니다. 현황이 비어 보여도 실제 데이터가 없는 것이 아닙니다.</p>
+       <ul>${LOAD.errors.map(e => `<li><b>${esc(e.table)}</b> — ${esc(e.message)}</li>`).join('')}</ul>`
+    : `<p>등록된 멤버가 없습니다. 데이터가 아직 없거나, 조회 권한(RLS)이 없어 비어 보일 수 있습니다.</p>
+       <p>멤버가 있어야 할 계정이라면 권한을 확인하고, 처음 사용하는 경우 ⚙ 관리에서 멤버를 추가하세요.</p>`;
+  document.getElementById('grid-container').innerHTML = `<div class="data-gate ${failed ? 'is-error' : ''}" role="alert">
+    <h3>${failed ? '데이터를 불러오지 못했습니다' : '표시할 멤버가 없습니다'}</h3>${detail}
+    <button type="button" class="btn-primary" id="btnRetryLoad">다시 시도</button></div>`;
+  document.getElementById('btnRetryLoad').onclick = async function () {
+    this.disabled = true; this.textContent = '불러오는 중…';
+    await loadData(); _initProjFilter(); render();
+  };
+  return true;
+}
+
 function render() {
   renderHeaderControls();
+  if (state.viewMode !== 'wisenm' && renderDataGate()) return;
   if (state.viewMode==='bench')   renderBenchView();
   else if (state.viewMode==='wisenm') {
     document.getElementById('kpi-wrap').innerHTML = '';
@@ -2624,6 +2645,7 @@ function mountProjectPicker(host, { id, value, getRange, getMemberId, needsPerio
     if (saved === 'dark' || saved === 'light') _applyTheme(saved);
   } catch(e) {}
   await _checkAuth();
+  document.getElementById('grid-container').innerHTML = '<div class="data-gate"><p>데이터를 불러오는 중…</p></div>';
   await loadData();
   _initProjFilter();
   render();

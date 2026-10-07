@@ -158,34 +158,32 @@ function _resetToDefaults() {
   DATA.assignments = _deepCopy(DEFAULT_ASSIGNMENTS);
 }
 
-async function loadData() {
-  try {
-    const [mRes, pRes, aRes, alRes] = await Promise.all([
-      _sb.from('wfm_members').select('*'),
-      _sb.from('wfm_projects').select('*'),
-      _sb.from('wfm_assignments').select('*'),
-      _sb.from('wfm_allowances').select('*'),
-    ]);
-    if (mRes.error) throw mRes.error;
+// 조회 상태: 'loading' | 'ok' | 'error'. 실패해도 샘플 데이터로 대체하거나 기본 데이터를 업로드하지 않는다.
+const LOAD = { status: 'loading', errors: [] };
 
-    if (mRes.data && mRes.data.length > 0) {
-      DATA.members     = mRes.data.map(_rowToMember).sort((a,b) => a.sort_order - b.sort_order);
-      DATA.projects    = (pRes.data || []).map(_rowToProject).sort((a,b) => a.sort_order - b.sort_order);
-      DATA.assignments = (aRes.data || []).map(_rowToAssignment);
-      DATA.allowances  = (alRes.data || []).map(_rowToAllowance);
-    } else {
-      // 최초 실행: 기본 데이터 Supabase에 업로드
-      _resetToDefaults();
-      await Promise.all([
-        _sb.from('wfm_members').insert(DATA.members.map(_memberToRow)),
-        _sb.from('wfm_projects').insert(DATA.projects.map(_projectToRow)),
-        _sb.from('wfm_assignments').insert(DATA.assignments.map(_assignmentToRow)),
-      ]);
-    }
-  } catch(e) {
+async function loadData() {
+  LOAD.status = 'loading'; LOAD.errors = [];
+  const tables = [['wfm_members', '멤버'], ['wfm_projects', '프로젝트'], ['wfm_assignments', '투입'], ['wfm_allowances', '현장수당']];
+  let res = [];
+  try {
+    res = await Promise.all(tables.map(([t]) => _sb.from(t).select('*')));
+    res.forEach((r, i) => { if (r.error) LOAD.errors.push({ table: tables[i][1], message: r.error.message || String(r.error) }); });
+  } catch (e) {
     console.error('Supabase load error:', e);
-    _resetToDefaults();
+    LOAD.errors.push({ table: '네트워크', message: (e && e.message) || String(e) });
   }
+  if (LOAD.errors.length) {
+    LOAD.status = 'error';
+    DATA.members = []; DATA.projects = []; DATA.assignments = []; DATA.allowances = [];
+    return false;
+  }
+  const [mRes, pRes, aRes, alRes] = res;
+  DATA.members     = (mRes.data  || []).map(_rowToMember).sort((a,b) => a.sort_order - b.sort_order);
+  DATA.projects    = (pRes.data  || []).map(_rowToProject).sort((a,b) => a.sort_order - b.sort_order);
+  DATA.assignments = (aRes.data  || []).map(_rowToAssignment);
+  DATA.allowances  = (alRes.data || []).map(_rowToAllowance);
+  LOAD.status = 'ok';
+  return true;
 }
 
 // ─── CRUD API ───
