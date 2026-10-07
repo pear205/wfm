@@ -254,8 +254,8 @@ button{cursor:pointer;border:none;background:none;font-family:inherit}
 #overlay.show{opacity:1;pointer-events:all}
 
 /* ─── Management Drawer ─── */
-.drawer{position:fixed;top:0;right:0;bottom:0;width:min(360px,100vw);background:var(--bg-surface);border-left:1px solid var(--border);box-shadow:var(--shadow-l);z-index:300;transform:translateX(100%);transition:transform .28s cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column}
-.drawer.open{transform:translateX(0)}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(360px,100vw);background:var(--bg-surface);border-left:1px solid var(--border);box-shadow:none;z-index:300;transform:translateX(100%);transition:transform .28s cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column}
+.drawer.open{transform:translateX(0);box-shadow:var(--shadow-l)}
 .drawer-header{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-shrink:0}
 .drawer-title{font-size:15px;font-weight:700;flex:1}
 .drawer-close{width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;color:var(--text-s);background:var(--bg-alt);font-size:14px;transition:background .12s}
@@ -446,10 +446,11 @@ button{cursor:pointer;border:none;background:none;font-family:inherit}
 .bench-avail-mm{font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--accent);flex-shrink:0}
 
 /* ─── Misc ─── */
-::-webkit-scrollbar{width:5px;height:5px}
-::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+::-webkit-scrollbar{width:12px;height:12px}
+::-webkit-scrollbar-track{background:var(--bg-alt)}
+::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:6px;border:3px solid var(--bg-alt)}
 ::-webkit-scrollbar-thumb:hover{background:var(--text-m)}
+::-webkit-scrollbar-corner{background:var(--bg-alt)}
 *:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .hidden{display:none!important}
 .skill-filter-btn{height:28px;padding:0 10px;border:1px solid var(--border);border-radius:4px;background:var(--bg-surface);color:var(--text-p);font-size:12px;cursor:pointer;white-space:nowrap}
