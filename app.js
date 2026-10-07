@@ -200,19 +200,31 @@ function _afterMutate() {
 // ═══════════════════════════════════════════════════════════
 // RENDER: YEAR VIEW
 // ═══════════════════════════════════════════════════════════
+// 기준 연도 앞뒤로 WIN_PAD 개월을 더한 표시 구간. pad=true 는 기준 연도 밖(집계 제외)
+const WIN_PAD = 6;
+const ymOf    = (y, m) => y * 12 + (m - 1);
+const ymParts = ym => ({ y: Math.floor(ym / 12), m: ym % 12 + 1 });
+function yearWindow(year) {
+  const cols = [];
+  for (let i = -WIN_PAD; i < 12 + WIN_PAD; i++) cols.push({ ...ymParts(year * 12 + i), pad: i < 0 || i >= 12 });
+  return cols;
+}
+const shiftYM = (y, m, d) => ymParts(ymOf(y, m) + d);
+
 function renderYearView() {
   const { year } = state;
+  const cols = yearWindow(year);
+  const colCls = c => `${c.pad ? 'is-pad' : ''}${c.m === 1 ? ' yr-start' : ''}`;
   // 팀 합계 행 (thead 첫 번째)
   let sumRow = `<tr class="grid-total-row"><th class="col-member grid-total-row"><div class="grid-total-label"><span>팀</span><span>합계</span></div></th>`;
   const _moArr = [], _capArr = [];
-  for (let m=1; m<=12; m++) {
-    const mo = DATA.members.reduce((s,mem) => s + getTotalMM(mem.id,year,m), 0);
-    const mCap = monthlyMaxCap(year, m);
-    _moArr.push(mo);
-    _capArr.push(mCap);
+  for (const c of cols) {
+    const mo = DATA.members.reduce((s,mem) => s + getTotalMM(mem.id,c.y,c.m), 0);
+    const mCap = monthlyMaxCap(c.y, c.m);
+    if (!c.pad) { _moArr.push(mo); _capArr.push(mCap); }
     const pct = mCap > 0 ? Math.min(100, (mo/mCap)*100) : 0;
     const col = mo > mCap ? 'var(--over)' : Math.abs(mo - mCap) < 0.05 ? 'var(--ok)' : mo > 0 ? 'var(--warn)' : 'var(--border)';
-    sumRow += `<th class="col-month grid-total-cell">${mo > 0
+    sumRow += `<th class="col-month grid-total-cell ${colCls(c)}">${mo > 0
       ? `<div class="grid-total-mm" style="color:${col}">${mo.toFixed(1)}</div><div class="grid-total-bar"><div class="grid-total-bar__fill" style="width:${pct.toFixed(1)}%;background:${col}"></div></div>`
       : ''}</th>`;
   }
@@ -240,33 +252,34 @@ function renderYearView() {
   let html = `<table class="year-table"><thead>${sumRow}<tr>
     <th class="col-member th-corner">멤버</th>`;
 
-  for (let m=1; m<=12; m++) {
-    const isCur = year===CUR_YEAR && m===CUR_MONTH;
-    html += `<th class="col-month th-month ${isCur?'is-current':''} ${isCur?'today-col':''}" data-month="${m}">
-      <span class="mo-label">${MONTH_KR[m-1]}</span>
-      <span class="mo-sub">${year}.${String(m).padStart(2,'0')}</span>
+  for (const c of cols) {
+    const isCur = c.y===CUR_YEAR && c.m===CUR_MONTH;
+    html += `<th class="col-month th-month ${colCls(c)} ${isCur?'is-current':''} ${isCur?'today-col':''}" data-month="${c.m}" data-year="${c.y}">
+      <span class="mo-label">${MONTH_KR[c.m-1]}</span>
+      <span class="mo-sub">${c.y}.${String(c.m).padStart(2,'0')}</span>
     </th>`;
   }
   html += `<th class="col-annual th-corner" style="font-size:10px;text-align:center;padding:6px 4px;line-height:1.3">연간<br>가용</th>`;
   html += `</tr></thead><tbody>`;
 
+  const inWin = a => a.year >= cols[0].y && a.year <= cols[cols.length-1].y;
   const visibleMembers = DATA.members.filter(mem => {
     if (state.projectFilter) {
-      const hasProj = DATA.assignments.some(a => a.memberId === mem.id && a.projectId === state.projectFilter && a.year === year);
+      const hasProj = DATA.assignments.some(a => a.memberId === mem.id && a.projectId === state.projectFilter && inWin(a));
       if (!hasProj) return false;
     }
     if (!state.memberFilter) return true;
     const q = state.memberFilter;
     if (mem.name.toLowerCase().includes(q)) return true;
     const memberProjects = DATA.assignments
-      .filter(a => a.memberId === mem.id && a.year === year)
+      .filter(a => a.memberId === mem.id && inWin(a))
       .map(a => getProject(a.projectId))
       .filter(Boolean);
     return memberProjects.some(pj => pj.name.toLowerCase().includes(q) || (pj.client||'').toLowerCase().includes(q));
   });
 
   if (visibleMembers.length === 0) {
-    html += `<tr><td colspan="13" style="padding:40px;text-align:center;color:var(--text-m);font-size:13px">검색 결과가 없습니다.</td></tr>`;
+    html += `<tr><td colspan="${cols.length + 1}" style="padding:40px;text-align:center;color:var(--text-m);font-size:13px">검색 결과가 없습니다.</td></tr>`;
   }
 
   visibleMembers.forEach(mem => {
@@ -283,7 +296,7 @@ function renderYearView() {
     // Greedy lane assignment: 겹치는 프로젝트만 다른 lane, 순차적인건 같은 lane
     const { projLane, numLanes } = (() => {
       const spans = {};
-      for (let m2=1; m2<=12; m2++) getAssignments(mem.id,year,m2).forEach(a=>{ if(!spans[a.projectId]) spans[a.projectId]=new Set(); spans[a.projectId].add(m2); });
+      cols.forEach((c2, ci) => getAssignments(mem.id,c2.y,c2.m).forEach(a=>{ if(!spans[a.projectId]) spans[a.projectId]=new Set(); spans[a.projectId].add(ci); }));
       const pids = Object.keys(spans).sort((a,b)=>Math.min(...spans[a])-Math.min(...spans[b]));
       const laneMs = []; const pLane = {};
       pids.forEach(pid=>{ let li=0; while(li<laneMs.length && [...spans[pid]].some(m=>laneMs[li].has(m))) li++; if(li===laneMs.length) laneMs.push(new Set()); spans[pid].forEach(m=>laneMs[li].add(m)); pLane[pid]=li; });
@@ -291,19 +304,21 @@ function renderYearView() {
     })();
 
     const seenProjects = new Set();
-    for (let m=1; m<=12; m++) {
-      const isCur = year===CUR_YEAR && m===CUR_MONTH;
-      const as = getAssignments(mem.id, year, m);
+    cols.forEach((c, ci) => {
+      const m = c.m, cy = c.y;
+      const isCur = cy===CUR_YEAR && m===CUR_MONTH;
+      const as = getAssignments(mem.id, cy, m);
       const sortedAs = [...as].sort((a,b)=>(projLane[a.projectId]??99)-(projLane[b.projectId]??99));
       const total = sortedAs.reduce((s,a)=>s+getDisplayMM(a),0);
         const cellCls = total>1.05?'is-over':total<0.98&&total>0?'is-warn':'';
-      const nextIds = m<12 ? new Set(getAssignments(mem.id,year,m+1).map(a=>a.projectId)) : new Set();
-      const prevIds = m>1  ? new Set(getAssignments(mem.id,year,m-1).map(a=>a.projectId)) : new Set();
+      const nx = shiftYM(cy, m, 1), pv = shiftYM(cy, m, -1);
+      const nextIds = new Set(getAssignments(mem.id,nx.y,nx.m).map(a=>a.projectId));
+      const prevIds = new Set(getAssignments(mem.id,pv.y,pv.m).map(a=>a.projectId));
       const tCol = total>1.05?'#E85C4A':total>=1.0?'#4DB36A':total>0?'var(--accent)':'';
       const utilAttr = total>1.05?'over':total<0.98&&total>0?'under':total>=0.98?'ok':'empty';
-      html += `<td class="assign-cell ${cellCls} ${isCur?'today-col':''}" data-member="${mem.id}" data-month="${m}" data-util="${utilAttr}">`;
+      html += `<td class="assign-cell ${cellCls} ${colCls(c)} ${isCur?'today-col':''}" data-member="${mem.id}" data-month="${m}" data-year="${cy}" data-util="${utilAttr}">`;
       html += `<div class="assign-bars">`;
-      { const tRL=m===1?4:0, tRR=m===12?4:0;
+      { const tRL=ci===0?4:0, tRR=ci===cols.length-1?4:0;
         const tBg = total>1.05 ? 'rgba(198,40,40,.75)' : 'transparent';
         const tColor = total===0 ? 'rgba(100,116,139,.35)' : total>1.05 ? 'rgba(255,255,255,.9)' : 'var(--text-m)';
         html += `<div class="cell-total-bar" style="border-radius:${tRL}px ${tRR}px ${tRR}px ${tRL}px;background:${tBg};color:${tColor}">${fmtMM(total)}</div>`; }
@@ -320,7 +335,7 @@ function renderYearView() {
         const cL = prevIds.has(a.projectId);
         const cR = nextIds.has(a.projectId);
         const rl = cL?0:4, rr = cR?0:4;
-        const assignKey = JSON.stringify({mid:mem.id,pid:pj.id,y:year,mo:m});
+        const assignKey = JSON.stringify({mid:mem.id,pid:pj.id,y:cy,mo:m});
         // 모드별 바 스타일
         const _mp = a.mm_plan != null ? a.mm_plan : (a.mm || 0);
         const _ma = a.mm_actual || 0;
@@ -391,8 +406,8 @@ function renderYearView() {
         }
       }
       html += `</div></td>`;
-    }
-    // 연간 가용 컬럼
+    });
+    // 연간 가용 컬럼 (기준 연도 12개월만 집계)
     const monthlyTotals = Array.from({length:12},(_,i)=>
       Math.round(getTotalMM(mem.id,year,i+1)*100)/100
     );
@@ -418,10 +433,10 @@ function renderYearView() {
     if (state.showAllowance) {
       html += `<tr class="allow-row">`;
       html += `<td class="col-member allow-label-cell">₩ 현장수당</td>`;
-      for (let m=1; m<=12; m++) {
-        const isCur = year===CUR_YEAR && m===CUR_MONTH;
-        const hasAl = DataAPI.hasAllowance(mem.id, year, m);
-        html += `<td class="col-month allow-cell ${hasAl?'allow-on':''} ${isCur?'today-col':''}" data-allow-member="${mem.id}" data-allow-month="${m}">${hasAl?'<span class="allow-dot"></span>':''}</td>`;
+      for (const c of cols) {
+        const isCur = c.y===CUR_YEAR && c.m===CUR_MONTH;
+        const hasAl = DataAPI.hasAllowance(mem.id, c.y, c.m);
+        html += `<td class="col-month allow-cell ${colCls(c)} ${hasAl?'allow-on':''} ${isCur?'today-col':''}" data-allow-member="${mem.id}" data-allow-month="${c.m}" data-allow-year="${c.y}">${hasAl?'<span class="allow-dot"></span>':''}</td>`;
       }
       html += `<td class="col-annual"></td></tr>`;
     }
@@ -1928,7 +1943,7 @@ document.getElementById('grid-container').addEventListener('click', e => {
   const allowCell = e.target.closest('.allow-cell[data-allow-member]');
   if (allowCell) {
     e.stopPropagation();
-    DataAPI.toggleAllowance(allowCell.dataset.allowMember, state.year, parseInt(allowCell.dataset.allowMonth));
+    DataAPI.toggleAllowance(allowCell.dataset.allowMember, parseInt(allowCell.dataset.allowYear), parseInt(allowCell.dataset.allowMonth));
     render();
     return;
   }
@@ -1938,9 +1953,10 @@ document.getElementById('grid-container').addEventListener('click', e => {
   if (assignCell) {
     const mid = assignCell.dataset.member;
     const mo  = parseInt(assignCell.dataset.month);
-    const existAs = getAssignments(mid, state.year, mo);
+    const cy  = parseInt(assignCell.dataset.year);
+    const existAs = getAssignments(mid, cy, mo);
     const firstProjId = existAs.length > 0 ? existAs[0].projectId : null;
-    openMemberAssignForm(firstProjId, mid);
+    openMemberAssignForm(firstProjId, mid, ymOf(cy, mo));
   }
 });
 

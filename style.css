@@ -635,3 +635,9 @@ button{cursor:pointer;border:none;background:none;font-family:inherit}
 /* 표 끌어서 스크롤 중 */
 #grid-wrap.is-panning,#grid-wrap.is-panning *{cursor:grabbing!important;user-select:none}
 #grid-wrap.is-panning .proj-bar{pointer-events:none}
+
+/* ─── 24개월 표시: 기준 연도 밖(앞뒤 6개월)은 연하게, 연도 경계는 구분선 ─── */
+.year-table td.assign-cell.is-pad:not(.today-col),.year-table td.allow-cell.is-pad:not(.today-col){background:color-mix(in srgb,var(--text-m) 6%,var(--bg-surface))}
+.year-table th.th-month.is-pad .mo-label{color:var(--text-m)}
+.year-table th.grid-total-cell.is-pad{opacity:.6}
+.year-table th.yr-start,.year-table td.yr-start{border-left:2px solid var(--border-strong)}
