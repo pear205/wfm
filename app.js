@@ -7,12 +7,14 @@ function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').rep
 
 // ─── 입력 검증 ───
 // 공수: 0~2, 0.05 단위(기존 입력창 규칙). 빈 값은 empty, 잘못된 값은 error
-function parseMM(raw) {
+// keep: 기존 저장값과 같으면 단위 검증을 면제 (다른 필드만 고칠 때 막지 않음)
+function parseMM(raw, keep) {
   const t = String(raw ?? '').trim();
   if (t === '') return { empty: true };
   const v = Number(t);
   if (!Number.isFinite(v)) return { error: '공수는 숫자로 입력하세요.' };
   if (v < 0 || v > 2) return { error: '공수는 0~2 사이로 입력하세요.' };
+  if (keep != null && Math.abs(v - keep) < 1e-9) return { value: v };
   if (Math.abs(v * 20 - Math.round(v * 20)) > 1e-6) return { error: '공수는 0.05 단위로 입력하세요.' };
   return { value: v };
 }
@@ -165,10 +167,12 @@ function mmClass(mm) {
   return 'over';
 }
 // 재직 기간 판단 (start/end 는 YYYYMM, null 이면 항상 재직). 용량 계산은 모두 이 함수를 쓴다
+const _toYM = v => { if (v == null || v === '') return 0; const n = parseInt(String(v).replace('-', ''), 10); return Number.isFinite(n) ? n : 0; };
 function memberActive(m, year, month) {
   const ym = year * 100 + month;
-  return ym >= (Number(m.start) || 0) && ym <= (Number(m.end) || 999999);
+  return ym >= _toYM(m.start) && ym <= (_toYM(m.end) || 999999);
 }
+const MM_EPS = 1e-6;   // 0.05 단위 합산 시 부동소수 오차 허용
 // 해당 월의 재직 인원수 = 월 용량(M/M). members 를 넘기면 그 범위(필터 결과)만 계산
 function monthlyMaxCap(year, month, members = DATA.members) {
   return members.filter(m => memberActive(m, year, month)).length;
@@ -271,7 +275,7 @@ function renderYearView() {
     const mCap = monthlyMaxCap(c.y, c.m, visibleMembers);
     if (!c.pad) { _moArr.push(mo); _capArr.push(mCap); }
     const pct = mCap > 0 ? Math.min(100, (mo/mCap)*100) : 0;
-    const col = mo > mCap ? 'var(--over)' : Math.abs(mo - mCap) < 0.05 ? 'var(--ok)' : mo > 0 ? 'var(--warn)' : 'var(--border)';
+    const col = mo > mCap + MM_EPS ? 'var(--over)' : Math.abs(mo - mCap) < 0.05 ? 'var(--ok)' : mo > 0 ? 'var(--warn)' : 'var(--border)';
     sumRow += `<th class="col-month grid-total-cell ${colCls(c)}">${mo > 0
       ? `<div class="grid-total-mm" style="color:${col}">${mo.toFixed(1)}</div><div class="grid-total-bar"><div class="grid-total-bar__fill" style="width:${pct.toFixed(1)}%;background:${col}"></div></div>`
       : ''}</th>`;
@@ -280,15 +284,15 @@ function renderYearView() {
   const _totalCap  = _capArr.reduce((s,v)=>s+v,0);
   const _teamAvail = Math.round((_totalCap-_teamTotal)*10)/10;
   const _teamCol = _teamAvail<0?'var(--over)':_teamAvail===0?'var(--ok)':'var(--warn)';
-  const _teamLbl = _teamAvail===0?'FULL':`${_teamAvail>0?'+':''}${_teamAvail.toFixed(1)}`;
+  const _teamLbl = _teamAvail===0?'여유 0':`${_teamAvail>0?'+':''}${_teamAvail.toFixed(1)}`;
   const _teamSpark = _moArr.map((v,i)=>{ const cap=_capArr[i]||1; const pct=Math.min(v/cap,1.5); const h=Math.max(2,Math.round(pct*16)); const c=v===0?'var(--warn)':v>cap?'var(--over)':v>=cap*0.9?'var(--ok)':'var(--accent)'; return `<div class="annual-spark-bar" style="height:${h}px;background:${c}"></div>`; }).join('');
   sumRow += `<th class="col-annual grid-total-cell"><div class="annual-cell"><div class="annual-spark">${_teamSpark}</div><div class="annual-avail-num" style="color:${_teamCol}">${_teamLbl}</div></div></th></tr>`;
 
   const _utilPct = _totalCap > 0 ? Math.round(_teamTotal/_totalCap*100) : 0;
-  const _overMo = _moArr.filter((v,i)=>v>_capArr[i]).length;
+  const _overMo = _moArr.filter((v,i)=>v>_capArr[i]+MM_EPS).length;
   // 개인 과부하: 재직 중인 멤버가 월 용량(1.0)을 넘긴 (멤버·월) 건수 — 팀 총량이 남아도 드러나도록 별도 집계
-  const _overPerson = visibleMembers.reduce((s, mem) => { const an = getMemberAnnual(mem, year); return s + an.monthlyTotals.filter((v, i) => an.active[i] && v > 1.05).length; }, 0);
-  const _teamAvailFmt = _teamAvail===0?'FULL':`${_teamAvail>0?'+':''}${_teamAvail.toFixed(1)}`;
+  const _overPerson = visibleMembers.reduce((s, mem) => { const an = getMemberAnnual(mem, year); return s + an.monthlyTotals.filter((v, i) => v > (an.active[i] ? 1.05 : 0.05)).length; }, 0);
+  const _teamAvailFmt = _teamAvail===0?'여유 0':`${_teamAvail>0?'+':''}${_teamAvail.toFixed(1)}`;
   const _availDispCol = _teamAvail<0?'var(--over)':_teamAvail===0?'var(--ok)':'var(--warn)';
   const _totalCol = _teamAvail<0?'var(--over)':_teamAvail===0?'var(--ok)':'var(--warn)';
 
@@ -297,7 +301,7 @@ function renderYearView() {
     <div class="kpi-card" title="재직 인원 기준 연간 투입 합계"><div class="kpi-card__label">연간 팀 M/M</div><div class="kpi-card__value" style="color:${_totalCol}">${_teamTotal.toFixed(1)}</div></div>
     <div class="kpi-card" title="투입 합계 ÷ 재직 용량"><div class="kpi-card__label">평균 가동률</div><div class="kpi-card__value">${_utilPct}%</div></div>
     <div class="kpi-card" title="팀 전체 투입이 재직 인원 수(용량)를 넘은 월 수"><div class="kpi-card__label">팀 총량 초과 월</div><div class="kpi-card__value" style="color:${_overMo>0?'var(--over)':'var(--text-s)'}">${_overMo}</div></div>
-    <div class="kpi-card" title="개인이 한 달에 1.0 M/M을 넘게 배정된 (멤버·월) 건수"><div class="kpi-card__label">개인 초과 투입</div><div class="kpi-card__value" style="color:${_overPerson>0?'var(--over)':'var(--text-s)'}">${_overPerson}</div></div>
+    <div class="kpi-card" title="개인이 한 달 용량(1.0 M/M, 0.05 허용)을 넘게 배정된 (멤버·월) 건수. 재직 기간 밖 투입도 포함"><div class="kpi-card__label">개인 초과 투입</div><div class="kpi-card__value" style="color:${_overPerson>0?'var(--over)':'var(--text-s)'}">${_overPerson}</div></div>
     <div class="kpi-card" title="재직 용량 - 투입 (양수=여유, 음수=초과)"><div class="kpi-card__label">연간 여유 M/M</div><div class="kpi-card__value" style="color:${_availDispCol}">${_teamAvailFmt}</div></div>
   </div><div class="kpi-scope">${esc(_scopeTxt)}</div></div>`;
 
@@ -457,7 +461,7 @@ function renderYearView() {
     }).join('');
     const numCol = annualAvail<0?'var(--over)':annualAvail===0?'var(--ok)':'var(--warn)';
     const numLabel = annualAvail===0 ? '여유 0' : `${annualAvail>0?'+':''}${annualAvail.toFixed(1)}`;
-    const overM = monthlyTotals.filter((v,i)=>activeMo[i]&&v>1.05).length;
+    const overM = monthlyTotals.filter((v,i)=>v>(activeMo[i]?1.05:0.05)).length;
     const underM = monthlyTotals.filter((v,i)=>activeMo[i]&&v>0&&v<0.98).length;
     const okM = monthlyTotals.filter((v,i)=>activeMo[i]&&v>=0.98&&v<=1.05).length;
     const totalMM = Math.round(ann.total*10)/10;
@@ -532,7 +536,7 @@ function renderBenchView() {
       const active = memberActive(mem, year, mo);
       const cap = active ? 1 : 0;
       const total = Math.round(getTotalMM(mem.id, year, mo)*100)/100;
-      return { total, active, cap, avail: active ? Math.max(0, Math.round((cap-total)*100)/100) : 0 };
+      return { total, active, cap, show: active || total > 0, avail: active ? Math.max(0, Math.round((cap-total)*100)/100) : 0 };
     });
     return { mem, monthly };
   });
@@ -541,7 +545,7 @@ function renderBenchView() {
   const teamMonthly = months.map((mo, idx) =>
     Math.round(memberRows.reduce((s, {monthly}) => {
       const d = monthly[idx];
-      if (!d.active) return s;
+      if (!d.show) return s;
       return s + (d.total > d.cap + 0.05 ? -(Math.round((d.total-d.cap)*100)/100) : d.avail);
     }, 0)*10)/10
   );
@@ -549,13 +553,13 @@ function renderBenchView() {
   // 선택 월 통계 (재직자만)
   const selIdx = selMo - 1;
   const selData = memberRows.map(r => ({mem:r.mem, ...r.monthly[selIdx]}))
-    .filter(d => d.active)
+    .filter(d => d.show)
     .sort((a,b) => b.avail - a.avail);
   const selTotal = Math.round(selData.reduce((s,d)=>s+d.total,0)*10)/10;
   const sumTotal = teamMonthly[selIdx];
-  const availCount = selData.filter(d=>d.avail>0).length;
-  const fullCount = selData.filter(d=>d.total>=0.98&&d.total<=1.05).length;
-  const overCount = selData.filter(d=>d.total>1.05).length;
+  const availCount = selData.filter(d=>d.avail>0.05).length;
+  const fullCount = selData.filter(d=>d.cap>0&&d.total>=0.98&&d.total<=1.05).length;
+  const overCount = selData.filter(d=>d.total>d.cap+0.05).length;
 
   // bench thead grid-total-row용 스케일
   const _benchAbsMax = Math.max(1, Math.max(...teamMonthly.map(v=>Math.abs(v))));
@@ -567,11 +571,11 @@ function renderBenchView() {
   const _benchScopeTxt = `${year}년 ${selMo}월 · ${_benchFiltered ? `필터 적용 ${scope.length}/${DATA.members.length}명` : `전체 ${DATA.members.length}명`} · 재직 중 ${selData.length}명 기준`;
 
   // 상단 요약 + 가용인력 패널 → 스크롤 밖 kpi-wrap으로
-  const availItems = selData.filter(d=>d.avail>0);
+  const availItems = selData.filter(d=>d.avail>0.05);
   document.getElementById('kpi-wrap').innerHTML = `<div class="kpi-panel">
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:stretch">
       <div class="kpi-cards">
-        <div class="kpi-card" title="${selMo}월 재직자의 투입 합계 (M/M)"><div class="kpi-card__label">${selMo}월 투입 M/M</div><div class="kpi-card__value">${fmtMM(selTotal)}</div></div>
+        <div class="kpi-card" title="${selMo}월 재직자(및 투입이 있는 멤버)의 투입 합계 (M/M)"><div class="kpi-card__label">${selMo}월 투입 M/M</div><div class="kpi-card__value">${fmtMM(selTotal)}</div></div>
         <div class="kpi-card" title="재직 용량 - 투입. 개인 초과분은 차감"><div class="kpi-card__label">${selMo}월 여유공수</div><div class="kpi-card__value" style="color:${sumTotal<0?'var(--over)':'var(--ok)'}">${fmtMM(sumTotal)}</div></div>
         <div class="kpi-card"><div class="kpi-card__label">가용 인력</div><div class="kpi-card__value" style="color:var(--ok)">${availCount}</div></div>
         <div class="kpi-card"><div class="kpi-card__label">풀 투입</div><div class="kpi-card__value">${fullCount}</div></div>
@@ -606,7 +610,8 @@ function renderBenchView() {
       const isNeg = avail < -0.05;
       const isEmpty = Math.abs(avail) < 0.05;
       const fillPct = Math.min(100, Math.abs(avail) / _benchAbsMax * 100);
-      const col = isNeg ? 'var(--over)' : isEmpty ? 'var(--border)' : avail < maxMM*0.5 ? 'var(--warn)' : 'var(--ok)';
+      const capMo = memberRows.filter(r => r.monthly[i].active).length;
+      const col = isNeg ? 'var(--over)' : isEmpty ? 'var(--border)' : avail < capMo*0.5 ? 'var(--warn)' : 'var(--ok)';
       const label = isNeg ? `−${fmtMM(-avail)}` : isEmpty ? '' : `+${fmtMM(avail)}`;
       return `<th class="col-month grid-total-cell${isToday?' today-col':''}${isSel?' bench-sel-col':''}" data-bench-mo="${mo}">${
         isEmpty ? '' : `<div class="grid-total-mm" style="color:${col}">${label}</div><div class="grid-total-bar"><div class="grid-total-bar__fill" style="width:${fillPct}%;background:${col}"></div></div>`
@@ -635,14 +640,14 @@ function renderBenchView() {
       const mo = months[i];
       const isToday = year===CUR_Y && mo===CUR_M;
       const isSel = mo===selMo;
-      const isOver = d.active && d.total > d.cap + 0.05;
+      const isOver = d.show && d.total > d.cap + 0.05;
       const hasAvail = d.avail > 0;
       const inner = isOver
-        ? `<div class="bench-bar-track" style="width:60%;margin:0 auto"><div class="bench-bar-fill" style="width:100%;background:#E85C4A"></div></div><div class="bench-bar-label" style="color:#c62828">−${fmtMM(Math.round((d.total-1)*100)/100)}</div>`
+        ? `<div class="bench-bar-track" style="width:60%;margin:0 auto"><div class="bench-bar-fill" style="width:100%;background:#E85C4A"></div></div><div class="bench-bar-label" style="color:#c62828">−${fmtMM(Math.round((d.total-d.cap)*100)/100)}</div>`
         : hasAvail
           ? `<div class="bench-bar-track" style="width:60%;margin:0 auto"><div class="bench-bar-fill" style="width:${Math.min(100,d.avail*100)}%;background:var(--accent)"></div></div><div class="bench-bar-label" style="color:var(--accent)">+${fmtMM(d.avail)}</div>`
           : '';
-      const off = !d.active;
+      const off = !d.show;
       html += `<td class="bench-td${isToday?' today-col':''}${isSel?' bench-sel-col':''}${off?' is-inactive':''}" data-bench-mo="${mo}" style="text-align:center;vertical-align:middle" title="${off ? `${mo}월 재직 기간 밖` : `${mo}월 투입 ${fmtMM(d.total)} M/M · 여유 ${fmtMM(d.avail)} M/M`}">${off ? '' : inner}</td>`;
     });
     html += `</tr>`;
@@ -1138,9 +1143,13 @@ function saveProjectForm() {
   const desc   = document.getElementById('fPjDesc')?.value.trim();
   const color  = document.getElementById('fPjColor')?.value;
   if (!name || !client) { alert('프로젝트명과 고객사를 입력하세요.'); return; }
-  if ((start && !isYM(start)) || (end && !isYM(end))) { showToast('기간은 2026-01 형식으로 입력하세요.'); return; }
-  if (!!start !== !!end) { showToast('시작·종료 월을 모두 입력하거나 둘 다 비워 주세요.'); return; }
-  if (start && end && start > end) { showToast('종료 월이 시작 월보다 빠릅니다.'); return; }
+  const prevPj = state.formMode?.id ? getProject(state.formMode.id) : null;
+  const periodChanged = !prevPj || (prevPj.start || '') !== start || (prevPj.end || '') !== end;
+  if (periodChanged) {
+    if ((start && !isYM(start)) || (end && !isYM(end))) { showToast('기간은 2026-01 형식으로 입력하세요.'); return; }
+    if (!!start !== !!end) { showToast('시작·종료 월을 모두 입력하거나 둘 다 비워 주세요.'); return; }
+    if (start && end && start > end) { showToast('종료 월이 시작 월보다 빠릅니다.'); return; }
+  }
   const { id } = state.formMode;
   if (id) { DataAPI.updateProject(id, {name, client, start, end, status, desc, color}); }
   else    { DataAPI.addProject({name, client, start, end, status, desc, color}); }
@@ -1680,12 +1689,14 @@ function renderAssignModal() {
   // Save new
   document.getElementById('saveNewAssign').onclick = () => {
     const pid      = document.getElementById('newAssignProject').value;
-    const pPlan = parseMM(document.getElementById('newAssignMM').value);
-    const pAct  = parseMM(document.getElementById('newAssignMMActual').value);
+    const exRow = as.find(a => a.projectId === pid);
+    const pPlan = parseMM(document.getElementById('newAssignMM').value, exRow ? (exRow.mm_plan != null ? exRow.mm_plan : exRow.mm) : null);
+    const pAct  = parseMM(document.getElementById('newAssignMMActual').value, exRow ? exRow.mm_actual : null);
     if (pPlan.empty) { showToast('계획 공수를 입력하세요.'); return; }
     if (pPlan.error) { showToast('계획 ' + pPlan.error); return; }
     if (pAct.error)  { showToast('실제 ' + pAct.error); return; }
     const mm_plan = pPlan.value, mm_actual = pAct.value ?? 0;
+    if (mm_plan === 0 && mm_actual === 0) { showToast('계획이 0이면 실제 공수를 함께 입력하세요. (계획 없는 실투입)'); return; }
     const type     = document.querySelector('input[name="assignType"]:checked').value;
     DataAPI.setAssignment(memberId, pid, year, month, mm_plan, mm_actual, type);
     renderAssignModal();
@@ -2293,13 +2304,7 @@ function _exportPng() {
     : { bg:'#f4f6fc', bgAlt:'#ffffff', bgSurf:'#ffffff', border:'#e0e3ec', text:'#1a1d21', textM:'#6b7280', accent:'#3d6feb' };
 
   const year = state.year;
-  const members = DATA.members.filter(m => {
-    const ys = (typeof m.start === 'string' && m.start) ? parseInt(m.start.slice(0,4)) : null;
-    const ye = (typeof m.end   === 'string' && m.end)   ? parseInt(m.end.slice(0,4))   : null;
-    if (ys && year < ys) return false;
-    if (ye && year > ye) return false;
-    return true;
-  });
+  const members = DATA.members.filter(m => { const an = getMemberAnnual(m, year); return an.cap > 0 || an.total > 0; });
 
   const SC = 2; // scale
   const MH = 20, RH = 36, HH = 28; // month header, row height, header height
@@ -2414,7 +2419,7 @@ function _exportPng() {
     ctx.beginPath(); ctx.moveTo(ax, ry); ctx.lineTo(ax, ry+RH); ctx.stroke();
     const annualAvail = getMemberAnnual(mem, year).avail;
     const numLabel = annualAvail===0 ? '여유 0' : `${annualAvail>0?'+':''}${annualAvail.toFixed(1)}`;
-    ctx.fillStyle = annualAvail>0 ? '#c62828' : annualAvail<0 ? C.accent : '#2e7d32';
+    ctx.fillStyle = annualAvail<0 ? '#c62828' : annualAvail===0 ? '#2e7d32' : '#b45309';
     ctx.font = `700 10px "Noto Sans KR", sans-serif`;
     ctx.textAlign = 'center';
     ctx.fillText(numLabel, ax+AW/2, ry+RH/2);
