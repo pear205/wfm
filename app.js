@@ -5,12 +5,41 @@
 // ─── XSS escape helper ───
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
-// ─── 막대/멤버 셀 키보드 조작: Enter·Space = 클릭, Delete = 막대 삭제 ───
+// ─── 막대/멤버 이름 키보드 조작 ───
+// Enter·Space = 클릭 · 막대: Delete = 삭제(확인 상태에서 Enter/Delete = 확정, Esc = 취소) · 방향키 = 이웃 막대로 이동
+function _barNav(t, key) {
+  const bars = [...document.querySelectorAll('.year-table tbody .proj-bar[role="button"]')];
+  const rowOf = el => el.closest('tr');
+  const same = bars.filter(b => rowOf(b) === rowOf(t));
+  let target = null;
+  if (key === 'ArrowRight') target = same[same.indexOf(t) + 1];
+  else if (key === 'ArrowLeft') target = same[same.indexOf(t) - 1];
+  else {
+    const rows = [...new Set(bars.map(rowOf))], nr = rows[rows.indexOf(rowOf(t)) + (key === 'ArrowDown' ? 1 : -1)];
+    if (nr) { const x = t.getBoundingClientRect().left; target = bars.filter(b => rowOf(b) === nr).sort((a, b) => Math.abs(a.getBoundingClientRect().left - x) - Math.abs(b.getBoundingClientRect().left - x))[0]; }
+  }
+  if (target) target.focus();
+}
+// 막대는 표 전체에서 Tab 정지점 하나만(roving tabindex), 나머지는 방향키로 이동
+document.addEventListener('focusin', e => {
+  if (!e.target.matches?.('.proj-bar[role="button"]')) return;
+  document.querySelectorAll('.proj-bar[role="button"][tabindex="0"]').forEach(b => { if (b !== e.target) b.tabIndex = -1; });
+  e.target.tabIndex = 0;
+});
 document.addEventListener('keydown', e => {
   const t = e.target;
-  if (!t.matches?.('.proj-bar[role="button"], .member-cell[role="button"]')) return;
+  if (!t.matches?.('.proj-bar[role="button"], .member-info[role="button"]')) return;
+  if (e.ctrlKey || e.altKey || e.metaKey) return;
+  if (t.classList.contains('proj-bar')) {
+    if (t.dataset.confirming) {
+      if (e.key === 'Enter' || e.key === 'Delete' || e.key === ' ') { e.preventDefault(); t.querySelector('[data-confirm-ok]')?.click(); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); t.querySelector('[data-confirm-cancel]')?.click(); }
+      return;
+    }
+    if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); t.querySelector('.proj-bar-del')?.click(); return; }
+    if (e.key.startsWith('Arrow')) { e.preventDefault(); _barNav(t, e.key); return; }
+  }
   if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); t.click(); }
-  else if ((e.key === 'Delete' || e.key === 'Backspace') && t.classList.contains('proj-bar')) { e.preventDefault(); t.querySelector('.proj-bar-del')?.click(); }
 });
 
 // ─── 입력 검증 ───
@@ -29,9 +58,34 @@ function parseMM(raw, keep) {
 const isYM = s => /^\d{4}-(0[1-9]|1[0-2])$/.test(s);
 
 // ─── 공통 모달: 열기/닫기/Escape/포커스를 한곳에서 관리 ───
+// 포커스 위치를 재렌더 후에도 복구하기 위한 키 (막대/멤버 이름)
+let _pendingFocus = null;
+function _focusKey(el) {
+  if (!el || !el.closest) return null;
+  const b = el.closest('.proj-bar[data-assign]'); if (b) return { type: 'bar', key: b.dataset.assign };
+  const m = el.closest('.member-info[role="button"]'); if (m) return { type: 'member', key: m.closest('.member-cell').dataset.member };
+  return null;
+}
+function _focusByKey(k) {
+  if (!k) return false;
+  const el = k.type === 'bar'
+    ? [...document.querySelectorAll('.proj-bar[data-assign]')].find(b => b.dataset.assign === k.key)
+    : document.querySelector(`.member-cell[data-member="${CSS.escape(k.key)}"] .member-info`);
+  if (el) { el.focus({ preventScroll: true }); return true; }
+  return false;
+}
+// 모달/드로어/패널이 열려 있으면 뒤 화면(#app)을 inert 로: Tab·스크린리더가 뒤로 새지 않게
+function syncBackgroundInert() {
+  const open = Modal._stack.length > 0
+    || document.getElementById('overlay').classList.contains('show')
+    || document.getElementById('mgmtDrawer').classList.contains('open');
+  const app = document.getElementById('app'); if (app) app.inert = open;
+}
+
 const Modal = {
   _stack: [],
   _focus: {},
+  _focusKey: {},
   onClose: {
     formModal()   { state.formMode = null; _maForm.dragging = _maForm.actDragging = false; _maForm.dragAnchor = null; },
     assignModal() { state.assignCtx = null; },
@@ -41,9 +95,11 @@ const Modal = {
     el.classList.remove('hidden');
     el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true');
     this._stack = this._stack.filter(x => x !== id); this._stack.push(id);
-    this._focus[id] = document.activeElement;
+    this._focus[id] = document.activeElement; this._focusKey[id] = _focusKey(document.activeElement);
+    syncBackgroundInert();
+    const card = el.querySelector('.modal-card'); if (card && !card.hasAttribute('tabindex')) card.tabIndex = -1;
     const f = el.querySelector('.modal-body input:not([type=hidden]),.modal-body select,.modal-body textarea');
-    if (f) f.focus({preventScroll: true});
+    (f || card)?.focus({preventScroll: true});
   },
   close(id) {
     const el = document.getElementById(id);
@@ -52,7 +108,10 @@ const Modal = {
     el.classList.add('hidden');
     this._stack = this._stack.filter(x => x !== id);
     this.onClose[id]?.();
+    syncBackgroundInert();
     const prev = this._focus[id]; delete this._focus[id];
+    const key = this._focusKey[id]; delete this._focusKey[id];
+    if (key) _pendingFocus = { key, t: Date.now() };
     if (prev && document.contains(prev) && prev.focus) prev.focus({preventScroll: true});
   },
   closeTop() {
@@ -344,9 +403,9 @@ function renderYearView() {
 
   visibleMembers.forEach(mem => {
     html += `<tr><td class="col-member">
-      <div class="member-cell" data-member="${mem.id}" role="button" tabindex="0" aria-label="${esc(mem.name)} 상세 보기">
+      <div class="member-cell" data-member="${mem.id}">
         <div class="member-avatar" style="background:${mem.color}">${esc(initials(mem.name))}</div>
-        <div class="member-info">
+        <div class="member-info" role="button" tabindex="0" aria-label="${esc(mem.name)} 상세 보기">
           <div class="member-name">${esc(mem.name)}</div>
           <div class="member-role">${esc(mem.role)}</div>
         </div>
@@ -403,7 +462,7 @@ function renderYearView() {
         const _titleMM = state.assignMode==='both'
           ? `계획 ${_mp.toFixed(2)} / 실제 ${_ma.toFixed(2)} M/M`
           : `${(state.assignMode==='plan'?_mp:(_ma||_mp)).toFixed(2)} M/M`;
-        const _barAttrs = `data-project="${pj.id}" data-assign='${assignKey}' title="${esc(pj.name)} · ${_titleMM} · ${a.type} — 클릭하여 공수 수정" data-member="${mem.id}" role="button" tabindex="0" aria-label="${esc(pj.name)} ${cy}년 ${m}월 ${_titleMM} 수정 (Enter: 수정, Delete: 삭제)"`;
+        const _barAttrs = `data-project="${pj.id}" data-assign='${assignKey}' title="${esc(pj.name)} · ${_titleMM} · ${esc(a.type)} — 클릭하여 공수 수정" data-member="${mem.id}" role="button" tabindex="-1" aria-label="${esc(pj.name)} ${cy}년 ${m}월 ${_titleMM} 수정 (Enter: 수정, Delete: 삭제)"`;
         const _biju = a.type==='비상주'?'biju':'';
 
         if (state.assignMode === 'both') {
@@ -444,7 +503,7 @@ function renderYearView() {
             ${_barAttrs}>
             <div style="position:absolute;inset:0;display:flex;align-items:center;padding:0 22px 0 5px;gap:3px;z-index:2;overflow:hidden">
               ${isFirst ? `<span class="proj-bar-name" style="color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.3);flex:0;margin-right:3px">${esc(pj.name)}</span>` : ''}
-              <span style="font-size:10px;font-weight:600;color:#fff;flex-shrink:0;text-shadow:0 1px 2px rgba(0,0,0,.35)">${mmLabel}</span>
+              <span class="pb-mm" style="font-size:10px;font-weight:600;color:#fff;flex-shrink:0;text-shadow:0 1px 2px rgba(0,0,0,.35)">${mmLabel}</span>
               ${mmSub ? `<span style="font-size:8px;color:rgba(255,255,255,.55);flex-shrink:0">${mmSub}</span>` : ''}
             </div>
             ${(unplanned||actOver) ? `<span class="pb-status-badge" style="background:${actOver?'#EF4444':'#EF4444'}">${actOver?'↑':'!'}</span>` : ''}
@@ -505,6 +564,7 @@ function renderYearView() {
 
   html += `</tbody></table>`;
   document.getElementById('grid-container').innerHTML = html;
+  const firstBar = document.querySelector('#grid-container .proj-bar[role="button"]'); if (firstBar) firstBar.tabIndex = 0;
   if (state._center) { state._center = false; requestAnimationFrame(centerYearGrid); }
 }
 
@@ -654,7 +714,7 @@ function renderBenchView() {
   filteredMemberRows.forEach(({mem, monthly}) => {
     html += `<tr><td class="col-member"><div class="member-cell" data-member="${mem.id}">
       <div class="member-avatar" style="background:${mem.color}">${esc(initials(mem.name))}</div>
-      <div class="member-info"><div class="member-name">${esc(mem.name)}</div><div class="member-role">${esc(mem.role)}</div></div>
+      <div class="member-info" role="button" tabindex="0" aria-label="${esc(mem.name)} 상세 보기"><div class="member-name">${esc(mem.name)}</div><div class="member-role">${esc(mem.role)}</div></div>
     </div></td>`;
     monthly.forEach((d,i) => {
       const mo = months[i];
@@ -808,21 +868,26 @@ function renderMemberPanel(memberId) {
   openBottomPanel('member');
 }
 
-let _panelOpener = null;
+let _panelOpener = null, _panelOpenerKey = null;
 function openBottomPanel(which) {
-  if (!document.getElementById('overlay').classList.contains('show')) _panelOpener = document.activeElement;
+  if (!document.getElementById('overlay').classList.contains('show')) { _panelOpener = document.activeElement; _panelOpenerKey = _focusKey(_panelOpener); }
   const p = document.getElementById('projectPanel'), m = document.getElementById('memberPanel');
   p.classList.toggle('open', which==='project'); p.inert = which !== 'project';
   m.classList.toggle('open',  which==='member');  m.inert = which !== 'member';
   document.getElementById('overlay').classList.add('show');
-  (which === 'project' ? p : m).querySelector('.panel-close')?.focus({ preventScroll: true });
+  syncBackgroundInert();
+  (which === 'project' ? p : m).focus({ preventScroll: true });
 }
 function closeBottomPanels() {
   const wasOpen = document.getElementById('overlay').classList.contains('show');
   for (const id of ['projectPanel', 'memberPanel']) { const el = document.getElementById(id); el.classList.remove('open'); el.inert = true; }
   document.getElementById('overlay').classList.remove('show');
-  if (wasOpen && _panelOpener && document.contains(_panelOpener)) _panelOpener.focus({ preventScroll: true });
-  _panelOpener = null;
+  syncBackgroundInert();
+  if (wasOpen && _panelOpener) {
+    if (document.contains(_panelOpener)) _panelOpener.focus({ preventScroll: true });
+    if (_panelOpenerKey) _pendingFocus = { key: _panelOpenerKey, t: Date.now() };
+  }
+  _panelOpener = null; _panelOpenerKey = null;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -833,7 +898,8 @@ function openDrawer() {
   _drawerOpener = document.activeElement;
   const dr = document.getElementById('mgmtDrawer'); dr.inert = false;
   dr.classList.add('open');
-  dr.querySelector('.drawer-close')?.focus({ preventScroll: true });
+  syncBackgroundInert();
+  dr.focus({ preventScroll: true });
   document.getElementById('drawerOverlay').style.opacity = '1';
   document.getElementById('drawerOverlay').style.pointerEvents = 'all';
   renderDrawerContent();
@@ -842,6 +908,7 @@ function closeDrawer() {
   const dr = document.getElementById('mgmtDrawer');
   const wasOpen = dr.classList.contains('open');
   dr.classList.remove('open'); dr.inert = true;
+  syncBackgroundInert();
   if (wasOpen && _drawerOpener && document.contains(_drawerOpener)) _drawerOpener.focus({ preventScroll: true });
   _drawerOpener = null;
   document.getElementById('drawerOverlay').style.opacity = '0';
@@ -1859,6 +1926,12 @@ function render() {
     renderWisenmView();
   }
   else                            renderYearView();
+  // 닫힌 모달/패널을 연 막대·멤버가 재렌더로 교체됐으면 같은 항목으로 포커스 복구
+  if (_pendingFocus) {
+    const p = _pendingFocus; _pendingFocus = null;
+    const ae = document.activeElement;
+    if (Date.now() - p.t < 1500 && (!ae || ae === document.body || !document.contains(ae))) _focusByKey(p.key);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2662,6 +2735,7 @@ function mountProjectPicker(host, { id, value, getRange, getMemberId, needsPerio
       else if (e.key === 'Enter') { e.preventDefault(); if (hi === -1) pick(''); else if (items[hi]) pick(items[hi].p.id); }
       else if (e.key === 'Tab') { focusBtn(); close(); }
     });
+    dd.addEventListener('keydown', e => { if (e.key === 'Tab' && e.target !== search) { focusBtn(); close(); } });
     // 목록/옵션 영역을 눌러도 검색 입력의 포커스를 유지
     dd.addEventListener('mousedown', e => { if (!e.target.closest('.pp-search, .pp-opts')) e.preventDefault(); });
     list.addEventListener('mousemove', e => {

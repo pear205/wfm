@@ -2,7 +2,7 @@
 
 ## 프로젝트 개요
 팀 인력 투입 현황 관리 Single-Page App (Vanilla JS, 빌드 도구 없음).
-- **연도별 뷰**: 멤버 × 월별 공수 그리드, KPI 패널, 연간 스파크라인
+- **투입 현황 뷰**(연도별): 멤버 × 월별 공수 그리드(기준 연도 앞뒤 6개월 포함 24개월), KPI 패널, 연간 스파크라인
 - **가용인력 뷰**: 월별 여유공수 현황, 멤버 검색·스킬 필터
 
 ## 파일 구조
@@ -11,7 +11,7 @@ wfm/
 ├── index.html   # HTML 뼈대 (134줄)
 ├── style.css    # 전체 CSS
 ├── app.js       # UI 로직 (섹션 구분: COMMON / YEAR VIEW / BENCH VIEW)
-└── data.js      # 데이터 레이어 (localStorage CRUD)
+└── data.js      # 데이터 레이어 (Supabase CRUD)
 ```
 
 ## 로컬 실행
@@ -22,7 +22,7 @@ python -m http.server 7900
 브라우저에서 http://localhost:7900 접속.
 
 ## 핵심 기술 사항
-- `DATA` 객체 (`data.js`): `members`, `projects`, `assignments` 배열, localStorage 영속화
+- `DATA` 객체 (`data.js`): `members`, `projects`, `assignments` 배열, Supabase 영속화 (조회 실패 시 오류 화면+재시도, 샘플 데이터 자동 대체 없음)
 - `state` 객체 (`app.js`): 현재 뷰·필터·모달 상태 관리
 - `DataAPI` (`data.js`): CRUD 메서드 (addMember, updateMember, setAssignment 등)
 - `render()` → `switchView()` → `renderYearView()` / `renderBenchView()`
@@ -41,7 +41,7 @@ const PRESET_SKILLS = {
   cloud: ['AWS', 'GCP', 'Azure', 'Firebase', 'Kubernetes', 'Docker'],
   ai:    ['GPT API', 'LangChain', 'MLflow', 'PyTorch', 'HuggingFace'],
   sol:   ['WiseN TM', 'Zendesk', 'Salesforce'],
-  etc:   ['Figma', 'Adobe XB', 'Jira', 'Confluence', 'Git', 'Notion'],
+  etc:   ['Figma', 'Adobe XD', 'Jira', 'Confluence', 'Git', 'Notion'],
 };
 ```
 

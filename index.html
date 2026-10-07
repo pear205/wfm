@@ -109,14 +109,14 @@
 <!-- Bottom panels -->
 <div id="spark-tooltip"></div>
 <div id="overlay"></div>
-<div class="detail-panel" id="projectPanel" role="dialog" aria-label="프로젝트 상세" inert>
+<div class="detail-panel" id="projectPanel" role="dialog" aria-label="프로젝트 상세" tabindex="-1" inert>
   <div class="panel-inner">
     <div class="panel-handle" id="projHandle"></div>
     <button class="panel-close" id="projClose" aria-label="닫기">✕</button>
     <div id="projectPanelContent"></div>
   </div>
 </div>
-<div class="detail-panel" id="memberPanel" role="dialog" aria-label="멤버 상세" inert>
+<div class="detail-panel" id="memberPanel" role="dialog" aria-label="멤버 상세" tabindex="-1" inert>
   <div class="panel-inner">
     <div class="panel-handle" id="memHandle"></div>
     <button class="panel-close" id="memClose" aria-label="닫기">✕</button>
@@ -125,7 +125,7 @@
 </div>
 
 <!-- Management drawer -->
-<div class="drawer" id="mgmtDrawer" role="dialog" aria-label="관리" inert>
+<div class="drawer" id="mgmtDrawer" role="dialog" aria-label="관리" tabindex="-1" inert>
   <div class="drawer-header">
     <span class="drawer-title">관리</span>
     <button class="drawer-close" id="mgmtClose" aria-label="닫기">✕</button>

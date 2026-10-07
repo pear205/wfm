@@ -298,8 +298,8 @@ button{cursor:pointer;border:none;background:none;font-family:inherit}
 .bulk-mcell:hover:not(.selected):not(.disabled) .bulk-bar{background:rgba(61,111,235,.25)}
 .bulk-val{font-size:10px;font-weight:700;pointer-events:none}
 .bulk-hint{font-size:11px;color:var(--text-m);min-height:15px}
-.bulk-open-btn{display:flex;align-items:center;gap:3px;max-width:0;opacity:0;overflow:hidden;background:none;border:0 solid var(--border);cursor:pointer;padding:2px 0;color:var(--text-m);font-size:11px;font-weight:600;border-radius:4px;line-height:1.4;margin-left:auto;white-space:nowrap}
-.member-cell:hover .bulk-open-btn,.member-cell:focus-within .bulk-open-btn,.bulk-open-btn:focus-visible{max-width:90px;opacity:1;padding:2px 6px;border-width:1px}
+.bulk-open-btn{display:flex;align-items:center;gap:3px;max-width:0;opacity:0;overflow:hidden;background:none;border:0 solid var(--border);cursor:pointer;padding:2px 0;color:var(--text-m);font-size:11px;font-weight:600;border-radius:4px;line-height:1.4;margin-left:-8px;white-space:nowrap}
+.member-cell:hover .bulk-open-btn,.member-cell:focus-within .bulk-open-btn,.bulk-open-btn:focus-visible{max-width:90px;opacity:1;padding:2px 6px;border-width:1px;margin-left:auto}
 .bulk-open-btn:hover{background:var(--accent-bg);color:var(--accent);border-color:var(--accent)}
 .modal-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-shrink:0}
 .modal-title{font-size:15px;font-weight:700;flex:1}
@@ -689,10 +689,11 @@ button{cursor:pointer;border:none;background:none;font-family:inherit}
 
 /* ─── 오늘 버튼, 키보드 포커스, 큰 글씨 ─── */
 .hd-nav-btn.hd-today{width:auto;padding:0 8px;font-size:11px;font-weight:600;margin-left:4px;border:1px solid var(--border-hd)}
-.proj-bar:focus-visible,.member-cell:focus-visible{outline:2px solid var(--accent);outline-offset:1px;z-index:3}
+.proj-bar:focus-visible,.member-info:focus-visible{outline:2px solid var(--accent);outline-offset:1px;z-index:3;border-radius:4px}
+.detail-panel:focus,.drawer:focus{outline:none}
 .large-text .proj-bar{height:22px}
 .large-text .proj-bar.proj-bar-both{height:24px}
-.large-text .proj-bar-name,.large-text .proj-bar-mm,.large-text .proj-bar-both span{font-size:12px!important}
+.large-text .proj-bar-name,.large-text .proj-bar-mm,.large-text .pb-mm{font-size:12px!important}
 .large-text .cell-total-bar{height:13px;font-size:10px}
 .large-text .assign-cell{min-height:82px}
 .large-text .member-name{font-size:13px}
