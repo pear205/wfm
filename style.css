@@ -144,10 +144,13 @@ button{cursor:pointer;border:none;background:none;font-family:inherit}
 .year-table thead th{position:sticky;top:0;z-index:10;background:var(--bg-surface);border:1px solid var(--border);border-bottom:2px solid var(--border)}
 .year-table thead tr th:first-child{border-radius:8px 0 0 8px}
 .year-table thead tr th:last-child{border-radius:0 8px 8px 0;border-right:1px solid var(--border)}
-.year-table thead th.col-member{z-index:20;left:0}
-.year-table thead th.col-annual{position:sticky;right:0;z-index:20;border-left:1px solid var(--border)}
-.year-table tbody td.col-member{position:sticky;left:0;z-index:5;border-right:none}
-.year-table tbody td.col-annual{position:sticky;right:0;z-index:5;border-left:none;border-right:1px solid var(--border);border-radius:0 8px 8px 0;vertical-align:middle!important}
+.year-table thead th.col-member{z-index:20;left:var(--gutter)}
+.year-table thead th.col-annual{position:sticky;right:var(--gutter);z-index:20;border-left:1px solid var(--border)}
+.year-table tbody td.col-member{position:sticky;left:var(--gutter);z-index:5;border-right:none}
+.year-table tbody td.col-annual{position:sticky;right:var(--gutter);z-index:5;border-left:none;border-right:1px solid var(--border);border-radius:0 8px 8px 0;vertical-align:middle!important}
+/* 가로 스크롤 시 고정 컬럼 바깥 여백(gutter)을 배경색으로 덮어 뒤로 지나가는 셀이 비치지 않게 함 */
+.year-table .col-member{box-shadow:calc(var(--gutter) * -1) 0 0 var(--bg-app)}
+.year-table .col-annual{box-shadow:var(--gutter) 0 0 var(--bg-app)}
 .annual-cell{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:5px 4px;min-height:36px}
 .annual-spark{display:flex;align-items:flex-end;gap:1px;height:16px}
 .annual-spark-bar{width:4px;border-radius:1px 1px 0 0;flex-shrink:0;min-height:2px}
@@ -156,7 +159,7 @@ button{cursor:pointer;border:none;background:none;font-family:inherit}
 #spark-tooltip .tt-name{font-weight:700;font-size:12px;margin-bottom:5px;color:var(--text-p)}
 #spark-tooltip .tt-row{display:flex;justify-content:space-between;gap:16px}
 #spark-tooltip .tt-val{font-family:'JetBrains Mono',monospace;font-weight:600}
-.th-corner{left:0;background:var(--bg-surface)!important;padding:10px 14px;font-size:13px;font-weight:700;letter-spacing:.04em;color:var(--text-m);text-transform:uppercase;text-align:center;vertical-align:middle!important}
+.th-corner{left:var(--gutter);background:var(--bg-surface)!important;padding:10px 14px;font-size:13px;font-weight:700;letter-spacing:.04em;color:var(--text-m);text-transform:uppercase;text-align:center;vertical-align:middle!important}
 .th-month{padding:9px 6px;text-align:center;cursor:pointer;transition:background .15s;user-select:none}
 .th-month:hover{background:var(--accent-bg)}
 .th-month .mo-label{font-size:12px;font-weight:600;color:var(--text-p);display:block}
