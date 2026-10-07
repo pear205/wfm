@@ -263,7 +263,8 @@ function renderYearView() {
   html += `<th class="col-annual th-corner" style="font-size:10px;text-align:center;padding:6px 4px;line-height:1.3">연간<br>가용</th>`;
   html += `</tr></thead><tbody>`;
 
-  const inWin = a => a.year >= cols[0].y && a.year <= cols[cols.length-1].y;
+  const winLo = ymOf(cols[0].y, cols[0].m), winHi = ymOf(cols[cols.length-1].y, cols[cols.length-1].m);
+  const inWin = a => { const k = ymOf(a.year, a.month); return k >= winLo && k <= winHi; };
   const visibleMembers = DATA.members.filter(mem => {
     if (state.projectFilter) {
       const hasProj = DATA.assignments.some(a => a.memberId === mem.id && a.projectId === state.projectFilter && inWin(a));
@@ -280,7 +281,7 @@ function renderYearView() {
   });
 
   if (visibleMembers.length === 0) {
-    html += `<tr><td colspan="${cols.length + 1}" style="padding:40px;text-align:center;color:var(--text-m);font-size:13px">검색 결과가 없습니다.</td></tr>`;
+    html += `<tr><td colspan="${cols.length + 2}" style="padding:40px;text-align:center;color:var(--text-m);font-size:13px">검색 결과가 없습니다.</td></tr>`;
   }
 
   visibleMembers.forEach(mem => {
@@ -1115,15 +1116,23 @@ function closeFormModal() { Modal.close('formModal'); }
 // ═══════════════════════════════════════════════════════════
 const _maForm = { winStart: 0, focusYm: null, pan: null, gaps: new Set(), dragAnchor: null, start: null, end: null, mmVals: {}, actualVals: {}, dragging: false, dragMoved: false, actStart: null, actEnd: null, actDragging: false, actDragMoved: false };
 
+// 팝업 편집 범위: 표에 보이는 24개월(기준 연도 ±6개월). 이 밖의 행은 읽지도 쓰지도 않는다
+function _maScope() {
+  const w = yearWindow(state.year);
+  return { lo: ymOf(w[0].y, w[0].m), hi: ymOf(w[w.length-1].y, w[w.length-1].m) };
+}
+
 function renderMAFormTrack() {
+  const scope = _maScope();
+  _maForm.winStart = Math.min(Math.max(_maForm.winStart, scope.lo), scope.hi - 11);
   const projectId = document.getElementById('maFProject')?.value || state.formMode?.id;
   const pj = getProject(projectId);
   const win = Array.from({length: 12}, (_, i) => _maForm.winStart + i);
 
-  const ps = _maForm.start === null ? 99 : Math.min(_maForm.start, _maForm.end ?? _maForm.start);
-  const pe = _maForm.end   === null ? -1 : Math.max(_maForm.start ?? 0, _maForm.end);
-  const as = _maForm.actStart === null ? 99 : Math.min(_maForm.actStart, _maForm.actEnd ?? _maForm.actStart);
-  const ae = _maForm.actEnd   === null ? -1 : Math.max(_maForm.actStart ?? 0, _maForm.actEnd);
+  const ps = _maForm.start === null ? Infinity : Math.min(_maForm.start, _maForm.end ?? _maForm.start);
+  const pe = _maForm.end   === null ? -Infinity : Math.max(_maForm.start ?? 0, _maForm.end);
+  const as = _maForm.actStart === null ? Infinity : Math.min(_maForm.actStart, _maForm.actEnd ?? _maForm.actStart);
+  const ae = _maForm.actEnd   === null ? -Infinity : Math.max(_maForm.actStart ?? 0, _maForm.actEnd);
 
   // Header row: empty label + 12 month headers (1월 또는 첫 칸에는 연도 표시)
   let hdrHtml = '<div class="ma-row-lbl"></div>';
@@ -1135,7 +1144,6 @@ function renderMAFormTrack() {
   // Plan row
   let planHtml = '<div class="ma-row-lbl plan-lbl">계획</div>';
   for (const m of win) {
-    const enabled = true;
     const inRange = m >= ps && m <= pe && !_maForm.gaps.has(m);
     const mv = _maForm.mmVals[m] ?? 1.0;
     let barStyle = '', valHtml = '';
@@ -1149,7 +1157,7 @@ function renderMAFormTrack() {
         valHtml = `<span style="font-size:9px;color:var(--text-m)">—</span>`;
       }
     }
-    planHtml += `<div class="bulk-mcell ma-plan-cell${inRange?' selected':''}${!enabled?' plan-off':''}" data-row="plan" data-m="${m}" data-en="${enabled?1:0}">
+    planHtml += `<div class="bulk-mcell ma-plan-cell${inRange?' selected':''}" data-row="plan" data-m="${m}" data-en="1">
       <div class="bulk-bar"${barStyle}>${valHtml}</div>
     </div>`;
   }
@@ -1197,11 +1205,14 @@ function _loadMAFormExisting() {
   const memberId  = document.getElementById('maFMember')?.value;
   const projectId = document.getElementById('maFProject')?.value;
   _maForm.start = null; _maForm.end = null; _maForm.mmVals = {}; _maForm.actualVals = {};
-  _maForm.actStart = null; _maForm.actEnd = null; _maForm.gaps = new Set();
+  _maForm.actStart = null; _maForm.actEnd = null; _maForm.gaps = new Set(); _maForm.initType = null;
   state.formMode.id = projectId || null;
   if (!memberId || !projectId) return;
-  const existAs = DATA.assignments.filter(a =>
-    a.memberId === memberId && a.projectId === projectId);
+  const scope = _maScope();
+  const existAs = DATA.assignments.filter(a => {
+    const k = ymOf(a.year, a.month);
+    return a.memberId === memberId && a.projectId === projectId && k >= scope.lo && k <= scope.hi;
+  });
   existAs.forEach(a => {
     const k = ymOf(a.year, a.month);
     _maForm.mmVals[k]     = a.mm_plan != null ? a.mm_plan : (a.mm || 0);
@@ -1210,6 +1221,7 @@ function _loadMAFormExisting() {
   if (existAs.length) {
     const typeRadio = [...document.querySelectorAll('input[name="maFType"]')].find(r => r.value === existAs[0].type);
     if (typeRadio) typeRadio.checked = true;
+    _maForm.initType = existAs[0].type;
     const months = existAs.map(a => ymOf(a.year, a.month));
     _maForm.start = Math.min(...months);
     _maForm.end   = Math.max(...months);
@@ -1282,8 +1294,8 @@ function openMemberAssignForm(projectId, memberId, focusYm) {
 
   if (memberId) document.getElementById('maFMember').value = memberId;
 
-  document.getElementById('maFPrev').onclick = () => { _maForm.winStart -= 6; renderMAFormTrack(); };
-  document.getElementById('maFNext').onclick = () => { _maForm.winStart += 6; renderMAFormTrack(); };
+  document.getElementById('maFPrev').onclick = () => { _maForm.focusYm = null; _maForm.winStart -= 6; renderMAFormTrack(); };
+  document.getElementById('maFNext').onclick = () => { _maForm.focusYm = null; _maForm.winStart += 6; renderMAFormTrack(); };
 
   // Member / Project change → reload existing data
   document.getElementById('maFMember').addEventListener('change', () => { _loadMAFormExisting(); renderMAFormTrack(); });
@@ -1360,25 +1372,37 @@ function saveMemberAssignForm() {
   const s = _maForm.start === null ? null : Math.min(_maForm.start, _maForm.end ?? _maForm.start);
   const e = _maForm.end   === null ? null : Math.max(_maForm.start ?? 0, _maForm.end);
 
+  const { lo, hi } = _maScope();
+  const inScope = k => k >= lo && k <= hi;
   const existing = new Map(DATA.assignments
     .filter(a => a.memberId === memberId && a.projectId === projectId)
     .map(a => [ymOf(a.year, a.month), a]));
   const keys = new Set([...existing.keys(), ...Object.keys(_maForm.actualVals).map(Number)]);
   if (s !== null) for (let k = s; k <= e; k++) keys.add(k);
+  const typeChanged = _maForm.initType != null && type !== _maForm.initType;
 
   keys.forEach(k => {
+    if (!inScope(k)) return;
     const { y, m } = ymParts(k);
     const ex  = existing.get(k);
     const act = _maForm.actualVals[k] || 0;
     const inPlan = s !== null && k >= s && k <= e && !_maForm.gaps.has(k);
+    const rowType = (ex && !typeChanged) ? ex.type : type;
+    let plan = null, actual = null;
     if (inPlan) {
-      const plan = _maForm.mmVals[k] ?? 1.0;
-      DataAPI.setAssignment(memberId, projectId, y, m, plan, act > 0 ? act : (ex ? 0 : plan), type);
+      plan = _maForm.mmVals[k] ?? 1.0;
+      actual = act > 0 ? act : (ex ? 0 : plan);
     } else if (act > 0) {
-      DataAPI.setAssignment(memberId, projectId, y, m, 0, act, type);
+      plan = 0; actual = act;
     } else if (ex) {
       DataAPI.deleteAssignment(memberId, projectId, y, m);
+      return;
+    } else {
+      return;
     }
+    const exPlan = ex ? (ex.mm_plan != null ? ex.mm_plan : (ex.mm || 0)) : null;
+    if (ex && exPlan === plan && (ex.mm_actual || 0) === actual && ex.type === rowType) return;
+    DataAPI.setAssignment(memberId, projectId, y, m, plan, actual, rowType);
   });
   closeFormModal();
   render();
@@ -2088,7 +2112,10 @@ document.getElementById('formDeleteBtn').onclick = function() {
       const editMemberId = document.getElementById('maFMember')?.value;
       const projectId    = document.getElementById('maFProject')?.value || state.formMode?.id;
       if (editMemberId && projectId) {
-        yearWindow(state.year).forEach(c => DataAPI.deleteAssignment(editMemberId, projectId, c.y, c.m));
+        const { lo, hi } = _maScope();
+        DATA.assignments
+          .filter(a => { const k = ymOf(a.year, a.month); return a.memberId === editMemberId && a.projectId === projectId && k >= lo && k <= hi; })
+          .forEach(a => DataAPI.deleteAssignment(editMemberId, projectId, a.year, a.month));
       }
       closeFormModal(); render(); _afterMutate();
     }
@@ -2354,7 +2381,12 @@ function _exportPdf() {
     '@media print{body{padding:0}}',
     '</style></head><body>',
     '<h2>WFM ' + state.year + '년 투입 현황</h2>',
-    table.outerHTML,
+    (() => {
+      const t = table.cloneNode(true);
+      t.querySelectorAll('.is-pad').forEach(el => el.remove());
+      t.querySelectorAll('.yr-start').forEach(el => el.classList.remove('yr-start'));
+      return t.outerHTML;
+    })(),
     '<script>window.onload=function(){window.print();}<' + '/script>',
     '</body></html>'
   ].join('');
@@ -2388,7 +2420,7 @@ document.addEventListener('click', e => {
     const p = _maForm.pan;
     if (!p) return;
     const ws = p.ws - Math.round((e.clientX - p.x) / p.colW);
-    if (ws !== _maForm.winStart) { _maForm.winStart = ws; renderMAFormTrack(); }
+    if (ws !== _maForm.winStart) { _maForm.focusYm = null; _maForm.winStart = ws; renderMAFormTrack(); }
     root.classList.add('is-panning-ma');
   });
   window.addEventListener('mouseup', () => { _maForm.pan = null; root.classList.remove('is-panning-ma'); });
