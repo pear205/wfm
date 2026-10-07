@@ -257,11 +257,7 @@ function renderYearView() {
       const isCur = year===CUR_YEAR && m===CUR_MONTH;
       const as = getAssignments(mem.id, year, m);
       const sortedAs = [...as].sort((a,b)=>(projLane[a.projectId]??99)-(projLane[b.projectId]??99));
-      const total = sortedAs.reduce((s,a)=>{
-        const mp = a.mm_plan!=null?a.mm_plan:(a.mm||0);
-        const ma = a.mm_actual||0;
-        return s+(state.assignMode==='act'?ma:mp);
-      },0);
+      const total = sortedAs.reduce((s,a)=>s+getDisplayMM(a),0);
         const cellCls = total>1.05?'is-over':total<0.98&&total>0?'is-warn':'';
       const nextIds = m<12 ? new Set(getAssignments(mem.id,year,m+1).map(a=>a.projectId)) : new Set();
       const prevIds = m>1  ? new Set(getAssignments(mem.id,year,m-1).map(a=>a.projectId)) : new Set();
@@ -375,7 +371,7 @@ function renderYearView() {
     const underM = monthlyTotals.filter(v=>v>0&&v<0.98).length;
     const okM = monthlyTotals.filter(v=>v>=0.98&&v<=1.05).length;
     const totalMM = Math.round(monthlyTotals.reduce((s,v)=>s+v,0)*10)/10;
-    html += `<td class="col-annual"><div class="annual-cell" data-spark-name="${mem.name}" data-spark-avail="${numLabel}" data-spark-over="${overM}" data-spark-under="${underM}" data-spark-ok="${okM}" data-spark-total="${totalMM}">
+    html += `<td class="col-annual"><div class="annual-cell" data-spark-name="${esc(mem.name)}" data-spark-avail="${numLabel}" data-spark-over="${overM}" data-spark-under="${underM}" data-spark-ok="${okM}" data-spark-total="${totalMM}">
       <div class="annual-spark">${spark}</div>
       <div class="annual-avail-num" style="color:${numCol}">${numLabel}</div>
     </div></td>`;
@@ -798,11 +794,11 @@ function openMemberForm(memberId) {
   document.getElementById('formContent').innerHTML = `
     <div class="form-group">
       <label class="form-label">이름</label>
-      <input class="form-input" id="fMemberName" value="${mem?.name||''}" placeholder="홍길동">
+      <input class="form-input" id="fMemberName" value="${esc(mem?.name||'')}" placeholder="홍길동">
     </div>
     <div class="form-group">
       <label class="form-label">직책</label>
-      <input class="form-input" id="fMemberRole" value="${mem?.role||''}" placeholder="선임 개발자">
+      <input class="form-input" id="fMemberRole" value="${esc(mem?.role||'')}" placeholder="선임 개발자">
     </div>
     <div class="form-group">
       <label class="form-label">색상</label>
@@ -971,11 +967,11 @@ function openProjectForm(projectId) {
   document.getElementById('formContent').innerHTML = `
     <div class="form-group">
       <label class="form-label">프로젝트명</label>
-      <input class="form-input" id="fPjName" value="${pj?.name||''}" placeholder="스마트팩토리 구축">
+      <input class="form-input" id="fPjName" value="${esc(pj?.name||'')}" placeholder="스마트팩토리 구축">
     </div>
     <div class="form-group">
       <label class="form-label">고객사</label>
-      <input class="form-input" id="fPjClient" value="${pj?.client||''}" placeholder="삼성전자">
+      <input class="form-input" id="fPjClient" value="${esc(pj?.client||'')}" placeholder="삼성전자">
     </div>
     <div class="form-row">
       <div class="form-group" style="margin-bottom:0">
@@ -994,7 +990,7 @@ function openProjectForm(projectId) {
     </div>
     <div class="form-group">
       <label class="form-label">설명</label>
-      <textarea class="form-textarea" id="fPjDesc" placeholder="프로젝트 설명...">${pj?.desc||''}</textarea>
+      <textarea class="form-textarea" id="fPjDesc" placeholder="프로젝트 설명...">${esc(pj?.desc||'')}</textarea>
     </div>
     <div class="form-group">
       <label class="form-label">색상</label>
@@ -1045,6 +1041,7 @@ function deleteProjectConfirm() {
 function closeFormModal() {
   document.getElementById('formModal').classList.add('hidden');
   state.formMode = null;
+  _maForm.dragging = _maForm.actDragging = false; _maForm.dragAnchor = null;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1166,7 +1163,7 @@ function openMemberAssignForm(projectId, memberId) {
   _maForm.actStart = null; _maForm.actEnd = null;
 
   const memberOpts = DATA.members.map(m =>
-    `<option value="${m.id}">${m.name} (${m.role})</option>`).join('');
+    `<option value="${m.id}">${esc(m.name)} (${esc(m.role)})</option>`).join('');
   const projOpts = `<option value="">프로젝트 선택</option>` +
     DATA.projects.map(p =>
       `<option value="${p.id}"${p.id===projectId?' selected':''}>${esc(p.name)} (${esc(p.client)})</option>`
@@ -1423,7 +1420,7 @@ function saveBulkModal() {
   const mn = Math.min(_bulk.start, _bulk.end??_bulk.start), mx = Math.max(_bulk.start, _bulk.end??_bulk.start);
   for (let m = mn; m <= mx; m++) {
     const existing = DATA.assignments.find(a => a.memberId===_bulk.memberId && a.projectId===_bulk.projId && a.year===state.year && a.month===m);
-    DataAPI.setAssignment(_bulk.memberId, _bulk.projId, state.year, m, _bulk.mmVals[m]??1.0, existing?.mm_actual||0, '상주');
+    DataAPI.setAssignment(_bulk.memberId, _bulk.projId, state.year, m, _bulk.mmVals[m]??1.0, existing?.mm_actual||0, existing?.type||'상주');
   }
   document.getElementById('bulkModal').classList.add('hidden');
   render();
@@ -2073,10 +2070,12 @@ document.getElementById('assignClose').onclick = () => {
 // Escape key
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
+  const open = id => !document.getElementById(id).classList.contains('hidden');
+  if (open('formModal'))   { closeFormModal(); return; }
+  if (open('bulkModal'))   { document.getElementById('bulkModal').classList.add('hidden'); return; }
+  if (open('assignModal')) { document.getElementById('assignModal').classList.add('hidden'); state.assignCtx = null; return; }
+  if (document.getElementById('mgmtDrawer').classList.contains('open')) { closeDrawer(); return; }
   closeBottomPanels();
-  closeFormModal();
-  closeDrawer();
-  document.getElementById('assignModal').classList.add('hidden');
 });
 
 // Theme toggle

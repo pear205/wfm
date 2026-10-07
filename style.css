@@ -109,6 +109,8 @@ button{cursor:pointer;border:none;background:none;font-family:inherit}
 .hd-mgmt-btn:hover{background:rgba(255,255,255,.1);color:var(--text-hd)}
 .hd-add-btn{height:28px;padding:0 12px;border-radius:7px;font-size:12px;font-weight:600;background:var(--accent);color:#fff;transition:filter .15s}
 .hd-add-btn:hover{filter:brightness(1.1)}
+#header button,.hd-title,.hd-year,.view-toggle{white-space:nowrap;flex-shrink:0}
+@media(max-width:760px){.hd-title,.hd-sep{display:none}#header{gap:8px}}
 
 /* ─── Subheader ─── */
 #subheader{background:var(--bg-hd-s);color:var(--text-hd);padding:0 16px;height:34px;display:flex;align-items:center;gap:8px;font-size:12px;border-bottom:1px solid var(--border-hd);flex-shrink:0}
@@ -404,7 +406,9 @@ button{cursor:pointer;border:none;background:none;font-family:inherit}
 .assign-cell.today-col{background:color-mix(in srgb,var(--accent) 6%,var(--bg-alt))}
 
 /* ── Toolbar ─ .filter-bar-* */
-.filter-bar{display:flex;align-items:center;gap:8px;padding:6px 16px;background:var(--bg-surface);border-bottom:1px solid var(--border)}
+.filter-bar{display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px;padding:6px 16px;background:var(--bg-surface);border-bottom:1px solid var(--border)}
+.filter-bar>*{white-space:nowrap;flex-shrink:0}
+.filter-bar .filter-bar-input{flex-shrink:1;min-width:120px}
 #filterInput{flex:1;max-width:260px}
 #benchFilterInput{max-width:200px}
 .filter-bar-label{font-size:11px;color:var(--text-m);font-weight:600}
