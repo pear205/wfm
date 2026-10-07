@@ -682,3 +682,7 @@ button{cursor:pointer;border:none;background:none;font-family:inherit}
 .data-gate.is-error h3{color:var(--over-fg)}
 .data-gate ul{margin:10px 0 16px;padding:0;list-style:none;text-align:left;font-size:12px;background:var(--bg-alt);border-radius:8px;padding:10px 14px}
 .data-gate .btn-primary{margin-top:14px}
+
+/* ─── KPI 집계 기준 안내, 재직 기간 밖 셀 ─── */
+.kpi-scope{margin-top:8px;font-size:11px;color:var(--text-m)}
+.year-table td.is-inactive,.year-table td.bench-td.is-inactive{background-image:repeating-linear-gradient(-45deg,transparent 0 5px,color-mix(in srgb,var(--text-m) 14%,transparent) 5px 6px)}

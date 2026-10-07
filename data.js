@@ -140,14 +140,18 @@ function _rowToAllowance(r) {
 // ─── 런타임 데이터 ───
 const DATA = { members: [], projects: [], assignments: [], allowances: [] };
 
-function _dbErr(error) {
-  console.error(error);
+// 화면 하단 알림 (저장 실패, 입력 오류 공용)
+function showToast(message) {
   let t = document.getElementById('dbToast');
-  if (!t) { t = document.createElement('div'); t.id = 'dbToast'; t.className = 'db-toast'; document.body.appendChild(t); }
-  t.textContent = '저장에 실패했습니다. 새로고침하면 변경 내용이 사라질 수 있습니다. (' + (error.message || '알 수 없는 오류') + ')';
+  if (!t) { t = document.createElement('div'); t.id = 'dbToast'; t.className = 'db-toast'; t.setAttribute('role', 'alert'); document.body.appendChild(t); }
+  t.textContent = message;
   t.classList.add('show');
   clearTimeout(t._h);
   t._h = setTimeout(() => t.classList.remove('show'), 6000);
+}
+function _dbErr(error) {
+  console.error(error);
+  showToast('저장에 실패했습니다. 새로고침하면 변경 내용이 사라질 수 있습니다. (' + (error.message || '알 수 없는 오류') + ')');
 }
 
 function _deepCopy(obj) { return JSON.parse(JSON.stringify(obj)); }

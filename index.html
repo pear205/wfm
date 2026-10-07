@@ -55,6 +55,9 @@
     <label class="filter-bar-check">
       <input type="checkbox" id="showMonthBg">월별 구분색
     </label>
+    <label class="filter-bar-check" title="기준 연도 앞뒤 6개월을 연하게 함께 표시 (KPI·연간 가용은 기준 연도만 집계)">
+      <input type="checkbox" id="showPadMonths" checked>앞뒤 기간 보기
+    </label>
     <div class="filter-bar-sep"></div>
     <select id="projFilter" class="filter-bar-select">
       <option value="">프로젝트 전체</option>
@@ -82,7 +85,7 @@
     <span class="filter-bar-label">필터</span>
     <input id="benchFilterInput" type="text" placeholder="멤버 검색..." class="filter-bar-input">
     <label class="filter-bar-check filter-bar-check--indent">
-      <input type="checkbox" id="benchShowAvailOnly">여유공수 있는 멤버만
+      <input type="checkbox" id="benchShowAvailOnly">선택 월에 여유 있는 멤버만
     </label>
     <div class="filter-bar-sep"></div>
     <div style="position:relative;display:flex;align-items:center">
@@ -130,7 +133,7 @@
   <div class="drawer-body" id="drawerBody"></div>
   <div class="drawer-footer">
     <button class="btn-ghost-xs" id="btnReset">데이터 초기화</button>
-    <span style="font-size:11px;color:var(--text-m)">localStorage 저장됨</span>
+    <span style="font-size:11px;color:var(--text-m)">변경 내용은 서버에 자동 저장됩니다</span>
   </div>
 </div>
 <div id="drawerOverlay" style="position:fixed;inset:0;z-index:290;background:rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:opacity .25s"></div>
