@@ -142,6 +142,8 @@ button{cursor:pointer;border:none;background:none;font-family:inherit}
 .col-month{width:118px;min-width:100px}
 .col-annual{width:76px;min-width:76px}
 .year-table thead th{position:sticky;top:0;z-index:10;background:var(--bg-surface);border:1px solid var(--border);border-bottom:2px solid var(--border)}
+/* 헤더가 두 줄(합계/월)이라 마지막 줄만 상단 고정 — 둘 다 top:0 이면 겹침 */
+.year-table thead tr:not(:last-child) th{top:auto}
 .year-table thead tr th:first-child{border-radius:8px 0 0 8px}
 .year-table thead tr th:last-child{border-radius:0 8px 8px 0;border-right:1px solid var(--border)}
 .year-table thead th.col-member{z-index:20;left:var(--gutter)}
@@ -422,7 +424,6 @@ button{cursor:pointer;border:none;background:none;font-family:inherit}
 /* ── KPIPanel ─ .kpi-panel .kpi-card */
 .bench-outer{display:flex;flex-direction:column;height:100%}
 .kpi-panel{padding:12px var(--gutter) 10px;display:flex;flex-direction:column;gap:10px;flex-shrink:0}
-.bench-wrap{overflow-x:auto}
 .kpi-cards{display:flex;gap:10px;flex-wrap:wrap}
 .kpi-card,.bench-avail-panel{background:var(--bg-surface);border:1px solid var(--border);border-radius:12px}
 .kpi-card{display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:10px 16px;width:120px;flex-shrink:0}
