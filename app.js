@@ -25,6 +25,7 @@ const Modal = {
   close(id) {
     const el = document.getElementById(id);
     if (el.classList.contains('hidden')) return;
+    closeProjectPickers();
     el.classList.add('hidden');
     this._stack = this._stack.filter(x => x !== id);
     this.onClose[id]?.();
@@ -1488,6 +1489,7 @@ function renderBulkModal() {
   document.getElementById('bulkProjSel').onchange = e => {
     _bulk.projId = e.target.value || null; _bulk.start = null; _bulk.end = null; _bulk.mmVals = {};
     renderBulkModal();
+    document.querySelector('#bulkProjHost .pp-btn')?.focus({ preventScroll: true });
   };
 
   const track = document.getElementById('bulkTrack');
@@ -2439,51 +2441,66 @@ function _ppList({ range, memberId, selectedId, query, needsPeriod, ignoreOpts }
   return items;
 }
 
+const _ppOpen = new Set();   // 열려 있는 선택창의 close 함수 (모달이 닫힐 때 함께 정리)
+const closeProjectPickers = () => [..._ppOpen].forEach(fn => fn());
+
 function mountProjectPicker(host, { id, value, getRange, getMemberId, needsPeriod = false, placeholder = '프로젝트 검색·선택' }) {
   host.innerHTML = `<div class="pp-wrap"><input type="hidden" id="${id}" value="${esc(value || '')}">
-    <button type="button" class="pp-btn form-select"><span class="pp-label"></span><span class="pp-caret">▾</span></button></div>`;
+    <button type="button" class="pp-btn form-select" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-label="프로젝트 선택"><span class="pp-label"></span><span class="pp-caret">▾</span></button></div>`;
   const hidden = host.querySelector('input'), btn = host.querySelector('.pp-btn'), lbl = host.querySelector('.pp-label');
   const labelOf = pid => { const p = getProject(pid); return p ? `${p.name}${p.client ? ' (' + p.client + ')' : ''}` : ''; };
   const paint = () => { const t = labelOf(hidden.value); lbl.textContent = t || placeholder; lbl.classList.toggle('pp-ph', !t); };
   paint();
 
   let dd = null, hi = 0, items = [];
-  const close = () => {
-    if (!dd) return;
-    dd.remove(); dd = null;
-    document.removeEventListener('mousedown', onOutside, true);
-    window.removeEventListener('resize', close);
-    document.removeEventListener('scroll', onScroll, true);
-  };
+  const focusBtn = () => btn.focus({ preventScroll: true });
+  // Esc: 포커스 위치와 무관하게 선택창만 닫고 모달은 유지 (전역 Esc 핸들러보다 먼저 capture 로 처리)
+  const onKey = e => { if (e.key === 'Escape' && dd) { e.stopPropagation(); e.preventDefault(); close(); focusBtn(); } };
   const onOutside = e => { if (dd && !dd.contains(e.target) && !btn.contains(e.target)) close(); };
-  const onScroll = e => { if (dd && !dd.contains(e.target)) close(); };
+  const onScroll = e => { if (dd && !dd.contains(e.target) && (e.target === document || e.target.contains(btn))) close(); };
+  function close() {
+    if (!dd) return;
+    dd.remove(); dd = null; _ppOpen.delete(close);
+    if (btn.isConnected) btn.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('mousedown', onOutside, true);
+    document.removeEventListener('keydown', onKey, true);
+    document.removeEventListener('scroll', onScroll, true);
+    window.removeEventListener('resize', close);
+  }
   const pick = pid => {
-    hidden.value = pid || ''; paint(); close(); btn.focus({ preventScroll: true });
-    hidden.dispatchEvent(new Event('change', { bubbles: true }));
+    const next = pid || '', changed = next !== hidden.value;
+    hidden.value = next; paint(); close(); focusBtn();
+    if (changed) hidden.dispatchEvent(new Event('change', { bubbles: true }));
   };
 
   const open = () => {
     if (dd) return close();
+    closeProjectPickers();
     dd = document.createElement('div'); dd.className = 'pp-dd';
-    dd.innerHTML = `<input type="text" class="pp-search" placeholder="프로젝트명·고객사 검색" autocomplete="off">
+    dd.innerHTML = `<input type="text" class="pp-search" placeholder="프로젝트명·고객사 검색" autocomplete="off" aria-label="프로젝트 검색">
       <div class="pp-list" role="listbox"></div>
       <div class="pp-opts"><label><input type="checkbox" data-o="includeDone"> 완료 포함</label><label><input type="checkbox" data-o="periodOnly"> 기간 내만</label></div>`;
     document.body.appendChild(dd);
+    _ppOpen.add(close); btn.setAttribute('aria-expanded', 'true');
     const search = dd.querySelector('.pp-search'), list = dd.querySelector('.pp-list');
-    dd.querySelectorAll('.pp-opts input').forEach(c => { c.checked = !!_ppOpts[c.dataset.o]; });
+    const syncOpts = () => dd.querySelectorAll('.pp-opts input').forEach(c => { c.checked = !!_ppOpts[c.dataset.o]; });
+    syncOpts();
 
     const ctx = ignoreOpts => ({ range: getRange(), memberId: getMemberId && getMemberId(), selectedId: hidden.value, query: search.value, needsPeriod, ignoreOpts });
+    const safeColor = c => /^#[0-9a-f]{3,8}$/i.test(c || '') ? c : '#999';
     const render = () => {
       items = _ppList(ctx(false));
-      let html = '';
-      html += `<div class="pp-item pp-none" data-id="">선택 안 함</div>`;
+      hi = Math.min(Math.max(hi, -1), items.length - 1);
+      let html = `<div class="pp-item pp-none${hi === -1 ? ' pp-hi' : ''}" role="option" data-id="">선택 안 함</div>`;
       let g = null;
       items.forEach((it, i) => {
-        if (it.p.status !== g) { g = it.p.status; html += `<div class="pp-group">${esc(STATUS_KR[g] || g || '기타')}</div>`; }
-        html += `<div class="pp-item${i === hi ? ' pp-hi' : ''}${it.p.id === hidden.value ? ' pp-sel' : ''}" role="option" data-i="${i}" data-id="${esc(it.p.id)}">
-          <span class="pp-dot" style="background:${esc(it.p.color || '#999')}"></span>
+        const st = PP_STATUS_ORDER.includes(it.p.status) ? it.p.status : 'etc';
+        if (st !== g) { g = st; html += `<div class="pp-group">${esc(STATUS_KR[st] || '기타')}</div>`; }
+        const sel = it.p.id === hidden.value;
+        html += `<div class="pp-item${i === hi ? ' pp-hi' : ''}${sel ? ' pp-sel' : ''}" role="option" aria-selected="${sel}" data-i="${i}" data-id="${esc(it.p.id)}">
+          <span class="pp-dot" style="background:${safeColor(it.p.color)}"></span>
           <span class="pp-name">${esc(it.p.name)}<small>${esc(it.p.client || '')}</small></span>
-          ${it.busy ? '<em class="pp-badge">투입중</em>' : ''}${it.noPeriod ? '<em class="pp-badge pp-badge-mute">기간 미정</em>' : ''}</div>`;
+          ${it.busy ? '<em class="pp-badge" title="이 기간에 해당 멤버의 투입 이력이 있음">투입중</em>' : ''}${it.noPeriod ? '<em class="pp-badge pp-badge-mute">기간 미정</em>' : ''}</div>`;
       });
       if (!items.length) {
         const hiddenCnt = _ppList(ctx(true)).length;
@@ -2499,22 +2516,30 @@ function mountProjectPicker(host, { id, value, getRange, getMemberId, needsPerio
     if (below >= 200 || below >= r.top) { dd.style.top = r.bottom + 4 + 'px'; dd.style.maxHeight = Math.min(h, below) + 'px'; }
     else { dd.style.bottom = innerHeight - r.top + 4 + 'px'; dd.style.maxHeight = Math.min(h, r.top - 12) + 'px'; }
 
+    // 처음 열 때는 현재 선택 항목에 하이라이트
+    hi = Math.max(0, _ppList(ctx(false)).findIndex(it => it.p.id === hidden.value));
     render(); search.focus();
     document.addEventListener('mousedown', onOutside, true);
-    window.addEventListener('resize', close);
+    document.addEventListener('keydown', onKey, true);
     document.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', close);
 
     search.addEventListener('input', () => { hi = 0; render(); });
     search.addEventListener('keydown', e => {
-      if (e.key === 'Escape') { e.stopPropagation(); close(); btn.focus({ preventScroll: true }); }
-      else if (e.key === 'ArrowDown') { e.preventDefault(); hi = Math.min(items.length - 1, hi + 1); render(); }
-      else if (e.key === 'ArrowUp') { e.preventDefault(); hi = Math.max(0, hi - 1); render(); }
-      else if (e.key === 'Enter') { e.preventDefault(); if (items[hi]) pick(items[hi].p.id); }
-      else if (e.key === 'Tab') close();
+      if (e.key === 'ArrowDown') { e.preventDefault(); hi = Math.min(items.length - 1, hi + 1); render(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); hi = Math.max(-1, hi - 1); render(); }
+      else if (e.key === 'Enter') { e.preventDefault(); if (hi === -1) pick(''); else if (items[hi]) pick(items[hi].p.id); }
+      else if (e.key === 'Tab') { focusBtn(); close(); }
     });
-    list.addEventListener('mousemove', e => { const it = e.target.closest('.pp-item[data-i]'); if (it && +it.dataset.i !== hi) { hi = +it.dataset.i; list.querySelectorAll('.pp-hi').forEach(x => x.classList.remove('pp-hi')); it.classList.add('pp-hi'); } });
+    // 목록/옵션 영역을 눌러도 검색 입력의 포커스를 유지
+    dd.addEventListener('mousedown', e => { if (!e.target.closest('.pp-search, .pp-opts')) e.preventDefault(); });
+    list.addEventListener('mousemove', e => {
+      const it = e.target.closest('.pp-item'); if (!it) return;
+      const idx = it.classList.contains('pp-none') ? -1 : +it.dataset.i;
+      if (idx !== hi) { hi = idx; list.querySelectorAll('.pp-hi').forEach(x => x.classList.remove('pp-hi')); it.classList.add('pp-hi'); }
+    });
     list.addEventListener('click', e => {
-      if (e.target.closest('.pp-more')) { _ppOpts.includeDone = true; _ppOpts.periodOnly = false; _ppSave(); dd.querySelectorAll('.pp-opts input').forEach(c => { c.checked = !!_ppOpts[c.dataset.o]; }); render(); return; }
+      if (e.target.closest('.pp-more')) { _ppOpts.includeDone = true; _ppOpts.periodOnly = false; syncOpts(); render(); search.focus(); return; }
       const it = e.target.closest('.pp-item'); if (it) pick(it.dataset.id);
     });
     dd.querySelector('.pp-opts').addEventListener('change', e => { const o = e.target.dataset.o; if (!o) return; _ppOpts[o] = e.target.checked; _ppSave(); hi = 0; render(); search.focus(); });
