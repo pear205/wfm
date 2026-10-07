@@ -700,3 +700,6 @@ button{cursor:pointer;border:none;background:none;font-family:inherit}
 .large-text .member-role{font-size:11px}
 .large-text .th-month .mo-label{font-size:13px}
 .large-text .th-month .mo-sub{font-size:10px}
+
+/* 관리 드로어: 추가 버튼을 목록 맨 위에 두고, 스크롤해도 보이게 고정 */
+.mgmt-add-btn.is-top{margin:0 0 8px;position:sticky;top:0;z-index:2;background:var(--bg-surface)}

@@ -992,8 +992,8 @@ function renderDrawerContent() {
           <button class="btn-icon-sm danger" data-del-project="${pj.id}" title="삭제">✕</button>
         </div>
       </div>`;}).join('');
-    body.innerHTML = `<div class="mgmt-list" id="projDragList">${items}</div>
-      <button class="mgmt-add-btn" id="addProjectBtn">+ 프로젝트 추가</button>`;
+    body.innerHTML = `<button class="mgmt-add-btn is-top" id="addProjectBtn">+ 프로젝트 추가</button>
+      <div class="mgmt-list" id="projDragList">${items}</div>`;
     document.getElementById('addProjectBtn').onclick = () => openProjectForm(null);
     _initDragReorder(document.getElementById('projDragList'), 'pid', DataAPI.reorderProjects.bind(DataAPI));
   }
