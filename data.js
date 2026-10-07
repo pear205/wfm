@@ -140,6 +140,16 @@ function _rowToAllowance(r) {
 // ─── 런타임 데이터 ───
 const DATA = { members: [], projects: [], assignments: [], allowances: [] };
 
+function _dbErr(error) {
+  console.error(error);
+  let t = document.getElementById('dbToast');
+  if (!t) { t = document.createElement('div'); t.id = 'dbToast'; t.className = 'db-toast'; document.body.appendChild(t); }
+  t.textContent = '저장에 실패했습니다. 새로고침하면 변경 내용이 사라질 수 있습니다. (' + (error.message || '알 수 없는 오류') + ')';
+  t.classList.add('show');
+  clearTimeout(t._h);
+  t._h = setTimeout(() => t.classList.remove('show'), 6000);
+}
+
 function _deepCopy(obj) { return JSON.parse(JSON.stringify(obj)); }
 
 function _resetToDefaults() {
@@ -184,14 +194,14 @@ const DataAPI = {
   addMember(m) {
     m.id = 'm' + Date.now();
     DATA.members.push(m);
-    _sb.from('wfm_members').insert(_memberToRow(m)).then(({error}) => { if(error) console.error(error); });
+    _sb.from('wfm_members').insert(_memberToRow(m)).then(({error}) => { if(error) _dbErr(error); });
     return m;
   },
   updateMember(id, u) {
     const i = DATA.members.findIndex(m => m.id === id);
     if (i >= 0) {
       DATA.members[i] = { ...DATA.members[i], ...u };
-      _sb.from('wfm_members').upsert(_memberToRow(DATA.members[i])).then(({error}) => { if(error) console.error(error); });
+      _sb.from('wfm_members').upsert(_memberToRow(DATA.members[i])).then(({error}) => { if(error) _dbErr(error); });
     }
   },
   reorderMembers(ids) {
@@ -199,15 +209,15 @@ const DataAPI = {
     DATA.members = ids.map(id => map.get(id)).filter(Boolean);
     DATA.members.forEach((m, i) => { m.sort_order = i; });
     const updates = DATA.members.map(m => _memberToRow(m));
-    _sb.from('wfm_members').upsert(updates).then(({error}) => { if(error) console.error(error); });
+    _sb.from('wfm_members').upsert(updates).then(({error}) => { if(error) _dbErr(error); });
   },
   deleteMember(id) {
     DATA.members     = DATA.members.filter(m => m.id !== id);
     DATA.assignments = DATA.assignments.filter(a => a.memberId !== id);
     DATA.allowances  = DATA.allowances.filter(a => a.memberId !== id);
-    _sb.from('wfm_members').delete().eq('id', id).then(({error}) => { if(error) console.error(error); });
-    _sb.from('wfm_assignments').delete().eq('member_id', id).then(({error}) => { if(error) console.error(error); });
-    _sb.from('wfm_allowances').delete().eq('member_id', id).then(({error}) => { if(error) console.error(error); });
+    _sb.from('wfm_members').delete().eq('id', id).then(({error}) => { if(error) _dbErr(error); });
+    _sb.from('wfm_assignments').delete().eq('member_id', id).then(({error}) => { if(error) _dbErr(error); });
+    _sb.from('wfm_allowances').delete().eq('member_id', id).then(({error}) => { if(error) _dbErr(error); });
   },
 
   reorderProjects(ids) {
@@ -215,28 +225,28 @@ const DataAPI = {
     DATA.projects = ids.map(id => map.get(id)).filter(Boolean);
     DATA.projects.forEach((p, i) => { p.sort_order = i; });
     const updates = DATA.projects.map(p => _projectToRow(p));
-    _sb.from('wfm_projects').upsert(updates).then(({error}) => { if(error) console.error(error); });
+    _sb.from('wfm_projects').upsert(updates).then(({error}) => { if(error) _dbErr(error); });
   },
 
   /* ── 프로젝트 ── */
   addProject(p) {
     p.id = 'p' + Date.now();
     DATA.projects.push(p);
-    _sb.from('wfm_projects').insert(_projectToRow(p)).then(({error}) => { if(error) console.error(error); });
+    _sb.from('wfm_projects').insert(_projectToRow(p)).then(({error}) => { if(error) _dbErr(error); });
     return p;
   },
   updateProject(id, u) {
     const i = DATA.projects.findIndex(p => p.id === id);
     if (i >= 0) {
       DATA.projects[i] = { ...DATA.projects[i], ...u };
-      _sb.from('wfm_projects').upsert(_projectToRow(DATA.projects[i])).then(({error}) => { if(error) console.error(error); });
+      _sb.from('wfm_projects').upsert(_projectToRow(DATA.projects[i])).then(({error}) => { if(error) _dbErr(error); });
     }
   },
   deleteProject(id) {
     DATA.projects    = DATA.projects.filter(p => p.id !== id);
     DATA.assignments = DATA.assignments.filter(a => a.projectId !== id);
-    _sb.from('wfm_projects').delete().eq('id', id).then(({error}) => { if(error) console.error(error); });
-    _sb.from('wfm_assignments').delete().eq('project_id', id).then(({error}) => { if(error) console.error(error); });
+    _sb.from('wfm_projects').delete().eq('id', id).then(({error}) => { if(error) _dbErr(error); });
+    _sb.from('wfm_assignments').delete().eq('project_id', id).then(({error}) => { if(error) _dbErr(error); });
   },
 
   /* ── 공수 ── */
@@ -249,7 +259,7 @@ const DataAPI = {
     else        { DATA.assignments.push(entry); }
     _sb.from('wfm_assignments')
       .upsert({ member_id:memberId, project_id:projectId, year, month, mm: mm_plan, mm_plan, mm_actual: mm_actual||0, type })
-      .then(({error}) => { if(error) console.error(error); });
+      .then(({error}) => { if(error) _dbErr(error); });
   },
   deleteAssignment(memberId, projectId, year, month) {
     DATA.assignments = DATA.assignments.filter(a =>
@@ -258,7 +268,7 @@ const DataAPI = {
     _sb.from('wfm_assignments').delete()
       .eq('member_id', memberId).eq('project_id', projectId)
       .eq('year', year).eq('month', month)
-      .then(({error}) => { if(error) console.error(error); });
+      .then(({error}) => { if(error) _dbErr(error); });
   },
 
   /* ── 현장수당 ── */
@@ -268,11 +278,11 @@ const DataAPI = {
       DATA.allowances.splice(i, 1);
       _sb.from('wfm_allowances').delete()
         .eq('member_id', memberId).eq('year', year).eq('month', month)
-        .then(({error}) => { if(error) console.error(error); });
+        .then(({error}) => { if(error) _dbErr(error); });
     } else {
       DATA.allowances.push({memberId, year, month});
       _sb.from('wfm_allowances').insert({member_id: memberId, year, month})
-        .then(({error}) => { if(error) console.error(error); });
+        .then(({error}) => { if(error) _dbErr(error); });
     }
   },
   hasAllowance(memberId, year, month) {

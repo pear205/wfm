@@ -5,6 +5,44 @@
 // ─── XSS escape helper ───
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
+// ─── 공통 모달: 열기/닫기/Escape/포커스를 한곳에서 관리 ───
+const Modal = {
+  _stack: [],
+  _focus: {},
+  onClose: {
+    formModal()   { state.formMode = null; _maForm.dragging = _maForm.actDragging = false; _maForm.dragAnchor = null; },
+    assignModal() { state.assignCtx = null; },
+  },
+  open(id) {
+    const el = document.getElementById(id);
+    el.classList.remove('hidden');
+    el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true');
+    this._stack = this._stack.filter(x => x !== id); this._stack.push(id);
+    this._focus[id] = document.activeElement;
+    const f = el.querySelector('.modal-body input:not([type=hidden]),.modal-body select,.modal-body textarea');
+    if (f) f.focus({preventScroll: true});
+  },
+  close(id) {
+    const el = document.getElementById(id);
+    if (el.classList.contains('hidden')) return;
+    el.classList.add('hidden');
+    this._stack = this._stack.filter(x => x !== id);
+    this.onClose[id]?.();
+    const prev = this._focus[id]; delete this._focus[id];
+    if (prev && document.contains(prev) && prev.focus) prev.focus({preventScroll: true});
+  },
+  closeTop() {
+    const id = this._stack[this._stack.length - 1];
+    if (!id) return false;
+    this.close(id); return true;
+  },
+};
+document.addEventListener('mousedown', e => { Modal._down = e.target; });
+document.addEventListener('click', e => {
+  const t = e.target;
+  if (t.classList?.contains('modal-overlay') && Modal._down === t && t.dataset.backdrop === 'close') Modal.close(t.id);
+});
+
 // ═══════════════════════════════════════════════════════════
 // CONSTANTS & STATE
 // ═══════════════════════════════════════════════════════════
@@ -911,7 +949,7 @@ function openMemberForm(memberId) {
   };
 
   bindColorGrid('colorGridMember', 'fMemberColor');
-  document.getElementById('formModal').classList.remove('hidden');
+  Modal.open('formModal');
 }
 
 function saveMemberForm() {
@@ -1009,7 +1047,7 @@ function openProjectForm(projectId) {
   });
 
   bindColorGrid('colorGridProject', 'fPjColor');
-  document.getElementById('formModal').classList.remove('hidden');
+  Modal.open('formModal');
 }
 
 function saveProjectForm() {
@@ -1038,16 +1076,12 @@ function deleteProjectConfirm() {
   _afterMutate();
 }
 
-function closeFormModal() {
-  document.getElementById('formModal').classList.add('hidden');
-  state.formMode = null;
-  _maForm.dragging = _maForm.actDragging = false; _maForm.dragAnchor = null;
-}
+function closeFormModal() { Modal.close('formModal'); }
 
 // ═══════════════════════════════════════════════════════════
 // MEMBER-ASSIGN FORM (투입 공수 설정)
 // ═══════════════════════════════════════════════════════════
-const _maForm = { start: null, end: null, mmVals: {}, actualVals: {}, dragging: false, dragMoved: false, actStart: null, actEnd: null, actDragging: false, actDragMoved: false };
+const _maForm = { gaps: new Set(), dragAnchor: null, start: null, end: null, mmVals: {}, actualVals: {}, dragging: false, dragMoved: false, actStart: null, actEnd: null, actDragging: false, actDragMoved: false };
 
 function renderMAFormTrack() {
   const projectId = document.getElementById('maFProject')?.value || state.formMode?.id;
@@ -1071,7 +1105,7 @@ function renderMAFormTrack() {
   let planHtml = '<div class="ma-row-lbl plan-lbl">계획</div>';
   for (let m = 1; m <= 12; m++) {
     const enabled = enabledSet.has(m);
-    const inRange = enabled && m >= ps && m <= pe;
+    const inRange = enabled && m >= ps && m <= pe && !_maForm.gaps.has(m);
     const mv = _maForm.mmVals[m] ?? 1.0;
     let barStyle = '', valHtml = '';
     if (inRange && pj) {
@@ -1117,7 +1151,7 @@ function renderMAFormTrack() {
   let hint = pj ? '계획: 드래그로 기간 선택 · 스크롤로 값 조정 | 실제: 드래그 후 스크롤' : '프로젝트를 먼저 선택하세요';
   if (pj && _maForm.start !== null) {
     let planTotal = 0, actTotal = 0;
-    for (let m = ps; m <= pe; m++) if (enabledSet.has(m)) planTotal += _maForm.mmVals[m] ?? 1;
+    for (let m = ps; m <= pe; m++) if (enabledSet.has(m) && !_maForm.gaps.has(m)) planTotal += _maForm.mmVals[m] ?? 1;
     for (let m = 1; m <= 12; m++) actTotal += _maForm.actualVals[m] || 0;
     hint = `계획 ${ps}월~${pe}월 · ${fmt(planTotal)} M/M` + (actTotal > 0 ? ` · 실제 합계 ${fmt(actTotal)} M/M` : '');
   }
@@ -1129,7 +1163,7 @@ function _loadMAFormExisting() {
   const memberId  = document.getElementById('maFMember')?.value;
   const projectId = document.getElementById('maFProject')?.value;
   _maForm.start = null; _maForm.end = null; _maForm.mmVals = {}; _maForm.actualVals = {};
-  _maForm.actStart = null; _maForm.actEnd = null;
+  _maForm.actStart = null; _maForm.actEnd = null; _maForm.gaps = new Set();
   state.formMode.id = projectId || null;
   if (!memberId || !projectId) return;
   const existAs = DATA.assignments.filter(a =>
@@ -1139,9 +1173,12 @@ function _loadMAFormExisting() {
     _maForm.actualVals[a.month] = a.mm_actual || 0;
   });
   if (existAs.length) {
+    const typeRadio = [...document.querySelectorAll('input[name="maFType"]')].find(r => r.value === existAs[0].type);
+    if (typeRadio) typeRadio.checked = true;
     const months = existAs.map(a => a.month);
     _maForm.start = Math.min(...months);
     _maForm.end   = Math.max(...months);
+    for (let m = _maForm.start; m <= _maForm.end; m++) if (!months.includes(m)) _maForm.gaps.add(m);
     const actMonths = existAs.filter(a => (a.mm_actual||0) > 0).map(a => a.month);
     if (actMonths.length) {
       _maForm.actStart = Math.min(...actMonths);
@@ -1160,7 +1197,7 @@ function openMemberAssignForm(projectId, memberId) {
   document.getElementById('formDeleteBtn').classList.add('hidden');
 
   _maForm.start = null; _maForm.end = null; _maForm.mmVals = {}; _maForm.actualVals = {};
-  _maForm.actStart = null; _maForm.actEnd = null;
+  _maForm.actStart = null; _maForm.actEnd = null; _maForm.gaps = new Set();
 
   const memberOpts = DATA.members.map(m =>
     `<option value="${m.id}">${esc(m.name)} (${esc(m.role)})</option>`).join('');
@@ -1227,7 +1264,7 @@ function openMemberAssignForm(projectId, memberId) {
     const m = +c.dataset.m;
     if (_maForm.dragging && c.dataset.row === 'plan' && c.dataset.en === '1') {
       if (m !== _maForm.end || (_maForm.dragAnchor != null && m !== _maForm.dragAnchor && !_maForm.dragMoved)) {
-        if (!_maForm.dragMoved && _maForm.dragAnchor != null) _maForm.start = _maForm.dragAnchor;
+        if (!_maForm.dragMoved && _maForm.dragAnchor != null) { _maForm.start = _maForm.dragAnchor; _maForm.gaps.clear(); }
         _maForm.dragMoved = true; _maForm.end = m; renderMAFormTrack();
       }
     }
@@ -1262,46 +1299,35 @@ function openMemberAssignForm(projectId, memberId) {
   }, {passive: false});
 
   renderMAFormTrack();
-  document.getElementById('formModal').classList.remove('hidden');
+  Modal.open('formModal');
 }
 
 function saveMemberAssignForm() {
   const memberId  = document.getElementById('maFMember')?.value;
   const projectId = document.getElementById('maFProject')?.value || state.formMode?.id;
-  if (!memberId || !projectId || _maForm.start === null) return;
+  if (!memberId || !projectId) return;
 
   const year = state.year;
   const type = document.querySelector('input[name="maFType"]:checked')?.value || '상주';
-  const pj   = getProject(projectId);
-
-  const enabledSet = new Set([1,2,3,4,5,6,7,8,9,10,11,12]);
-
   const s = _maForm.start === null ? null : Math.min(_maForm.start, _maForm.end ?? _maForm.start);
   const e = _maForm.end   === null ? null : Math.max(_maForm.start ?? 0, _maForm.end);
 
-  // Save plan range months
-  if (s !== null) {
-    for (let m = s; m <= e; m++) {
-      if (!enabledSet.has(m)) continue;
-      const mm_plan = _maForm.mmVals[m] ?? 1.0;
-      // 실제값이 별도 입력된 경우 우선, 없으면 계획과 동일하게 자동 등록 (계획 0은 예외)
-      const exA = DATA.assignments.find(a => a.memberId===memberId && a.projectId===projectId && a.year===year && a.month===m);
-      const mm_actual = _maForm.actualVals[m] > 0 ? _maForm.actualVals[m] : (exA ? 0 : (mm_plan > 0 ? mm_plan : 0));
-      DataAPI.setAssignment(memberId, projectId, year, m, mm_plan, mm_actual, type);
-    }
-  }
-  // Save actual-only months outside plan range
   for (let m = 1; m <= 12; m++) {
-    const inPlan = s !== null && enabledSet.has(m) && m >= s && m <= e;
-    if (inPlan) continue;
-    const mm_actual = _maForm.actualVals[m] || 0;
-    if (mm_actual > 0) {
-      const ex = DATA.assignments.find(a => a.memberId===memberId && a.projectId===projectId && a.year===year && a.month===m);
-      DataAPI.setAssignment(memberId, projectId, year, m, ex ? (ex.mm_plan ?? ex.mm ?? 0) : 0, mm_actual, type);
+    const ex  = DATA.assignments.find(a => a.memberId===memberId && a.projectId===projectId && a.year===year && a.month===m);
+    const act = _maForm.actualVals[m] || 0;
+    const inPlan = s !== null && m >= s && m <= e && !_maForm.gaps.has(m);
+    if (inPlan) {
+      const plan = _maForm.mmVals[m] ?? 1.0;
+      DataAPI.setAssignment(memberId, projectId, year, m, plan, act > 0 ? act : (ex ? 0 : plan), type);
+    } else if (act > 0) {
+      DataAPI.setAssignment(memberId, projectId, year, m, 0, act, type);
+    } else if (ex) {
+      DataAPI.deleteAssignment(memberId, projectId, year, m);
     }
   }
   closeFormModal();
   render();
+  _afterMutate();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1324,7 +1350,7 @@ function openBulkModal(memberId) {
   const mem = getMember(memberId);
   document.getElementById('bulkTitle').textContent = `${mem?.name} · ${state.year}년 일괄 공수 입력`;
   renderBulkModal();
-  document.getElementById('bulkModal').classList.remove('hidden');
+  Modal.open('bulkModal');
 }
 
 function renderBulkModal() {
@@ -1422,8 +1448,9 @@ function saveBulkModal() {
     const existing = DATA.assignments.find(a => a.memberId===_bulk.memberId && a.projectId===_bulk.projId && a.year===state.year && a.month===m);
     DataAPI.setAssignment(_bulk.memberId, _bulk.projId, state.year, m, _bulk.mmVals[m]??1.0, existing?.mm_actual||0, existing?.type||'상주');
   }
-  document.getElementById('bulkModal').classList.add('hidden');
+  Modal.close('bulkModal');
   render();
+  _afterMutate();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1435,7 +1462,7 @@ function openAssignModal(memberId, year, month) {
   document.getElementById('assignTitle').textContent =
     `${mem?.name} · ${year}년 ${MONTH_KR[month-1]}`;
   renderAssignModal();
-  document.getElementById('assignModal').classList.remove('hidden');
+  Modal.open('assignModal');
 }
 
 function renderAssignModal() {
@@ -1998,11 +2025,9 @@ document.getElementById('formDeleteBtn').onclick = function() {
       const editMemberId = document.getElementById('maFMember')?.value;
       const projectId    = document.getElementById('maFProject')?.value || state.formMode?.id;
       if (editMemberId && projectId) {
-        const s = _maForm.start === null ? 1 : Math.min(_maForm.start, _maForm.end ?? _maForm.start);
-        const e = _maForm.end   === null ? 12 : Math.max(_maForm.start ?? 1, _maForm.end);
-        for (let m = s; m <= e; m++) DataAPI.deleteAssignment(editMemberId, projectId, state.year, m);
+        for (let m = 1; m <= 12; m++) DataAPI.deleteAssignment(editMemberId, projectId, state.year, m);
       }
-      closeFormModal(); render();
+      closeFormModal(); render(); _afterMutate();
     }
   });
 };
@@ -2010,8 +2035,8 @@ document.getElementById('formCancelBtn').onclick = closeFormModal;
 document.getElementById('formClose').onclick     = closeFormModal;
 
 // Bulk assign modal
-document.getElementById('bulkClose').onclick = () => document.getElementById('bulkModal').classList.add('hidden');
-document.getElementById('bulkCancelBtn').onclick = () => document.getElementById('bulkModal').classList.add('hidden');
+document.getElementById('bulkClose').onclick = () => Modal.close('bulkModal');
+document.getElementById('bulkCancelBtn').onclick = () => Modal.close('bulkModal');
 document.getElementById('bulkSaveBtn').onclick = saveBulkModal;
 document.addEventListener('mouseup', e => {
   if (_bulk.dragging) {
@@ -2041,7 +2066,8 @@ document.addEventListener('mouseup', e => {
           const lo = Math.min(_maForm.start, _maForm.end ?? _maForm.start), hi = Math.max(_maForm.start, _maForm.end ?? _maForm.start);
           _maForm.start = Math.min(lo, m); _maForm.end = Math.max(hi, m);
         }
-        for (let mi = _maForm.start; mi <= _maForm.end; mi++) if (_maForm.mmVals[mi] == null) _maForm.mmVals[mi] = 1.0;
+        _maForm.gaps.delete(m);
+        for (let mi = _maForm.start; mi <= _maForm.end; mi++) if (_maForm.mmVals[mi] == null && !_maForm.gaps.has(mi)) _maForm.mmVals[mi] = 1.0;
         renderMAFormTrack();
       }
     }
@@ -2062,18 +2088,12 @@ document.addEventListener('mouseup', e => {
 });
 
 // Assign modal
-document.getElementById('assignClose').onclick = () => {
-  document.getElementById('assignModal').classList.add('hidden');
-  state.assignCtx = null;
-};
+document.getElementById('assignClose').onclick = () => Modal.close('assignModal');
 
 // Escape key
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
-  const open = id => !document.getElementById(id).classList.contains('hidden');
-  if (open('formModal'))   { closeFormModal(); return; }
-  if (open('bulkModal'))   { document.getElementById('bulkModal').classList.add('hidden'); return; }
-  if (open('assignModal')) { document.getElementById('assignModal').classList.add('hidden'); state.assignCtx = null; return; }
+  if (Modal.closeTop()) return;
   if (document.getElementById('mgmtDrawer').classList.contains('open')) { closeDrawer(); return; }
   closeBottomPanels();
 });
