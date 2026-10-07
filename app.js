@@ -1254,11 +1254,6 @@ function openMemberAssignForm(projectId, memberId, focusYm) {
 
   const memberOpts = DATA.members.map(m =>
     `<option value="${m.id}">${esc(m.name)} (${esc(m.role)})</option>`).join('');
-  const projOpts = `<option value="">프로젝트 선택</option>` +
-    DATA.projects.map(p =>
-      `<option value="${p.id}"${p.id===projectId?' selected':''}>${esc(p.name)} (${esc(p.client)})</option>`
-    ).join('');
-
   document.getElementById('formContent').innerHTML = `
     <div class="form-row">
       <div class="form-group" style="flex:1">
@@ -1267,7 +1262,7 @@ function openMemberAssignForm(projectId, memberId, focusYm) {
       </div>
       <div class="form-group" style="flex:1.6">
         <label class="form-label">프로젝트</label>
-        <select class="form-select" id="maFProject">${projOpts}</select>
+        <div id="maFProjectHost"></div>
       </div>
     </div>
     <div class="form-group" style="margin-bottom:8px">
@@ -1293,6 +1288,10 @@ function openMemberAssignForm(projectId, memberId, focusYm) {
     </div>`;
 
   if (memberId) document.getElementById('maFMember').value = memberId;
+  mountProjectPicker(document.getElementById('maFProjectHost'), {
+    id: 'maFProject', value: projectId || '', getRange: _maScope,
+    getMemberId: () => document.getElementById('maFMember')?.value,
+  });
 
   document.getElementById('maFPrev').onclick = () => { _maForm.focusYm = null; _maForm.winStart -= 6; renderMAFormTrack(); };
   document.getElementById('maFNext').onclick = () => { _maForm.focusYm = null; _maForm.winStart += 6; renderMAFormTrack(); };
@@ -1434,15 +1433,6 @@ function openBulkModal(memberId) {
 
 function renderBulkModal() {
   const year = state.year;
-  const activeProjs = DATA.projects.filter(p => {
-    if (!p.start || !p.end) return false;
-    const [sy, sm] = p.start.split('-').map(Number);
-    const [ey, em] = p.end.split('-').map(Number);
-    return (sy < year || (sy === year)) && (ey > year || ey === year);
-  });
-  let projOpts = `<option value="">프로젝트 선택</option>`;
-  activeProjs.forEach(p => { projOpts += `<option value="${p.id}"${_bulk.projId===p.id?' selected':''}>${esc(p.name)}</option>`; });
-
   const proj = _bulk.projId ? DATA.projects.find(p => p.id === _bulk.projId) : null;
   const MONTHS_KR = ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
   const s = _bulk.start === null ? 99 : Math.min(_bulk.start, _bulk.end ?? _bulk.start);
@@ -1481,8 +1471,8 @@ function renderBulkModal() {
   document.getElementById('bulkBody').innerHTML = `
     <div class="bulk-field">
       <label class="bulk-lbl">프로젝트</label>
-      <select id="bulkProjSel" style="width:100%">${projOpts}</select>
-      ${proj ? `<div class="bulk-range-hint">기간: ${proj.start.replace('-','년 ')}월 ~ ${proj.end.replace('-','년 ')}월</div>` : ''}
+      <div id="bulkProjHost"></div>
+      ${proj && proj.start && proj.end ? `<div class="bulk-range-hint">기간: ${proj.start.replace('-','년 ')}월 ~ ${proj.end.replace('-','년 ')}월</div>` : ''}
     </div>
     <div class="bulk-field">
       <label class="bulk-lbl">적용 기간 — 드래그로 범위 선택 · 클릭 또는 휠로 공수 조정 (0.25/0.5/0.75/1.0)</label>
@@ -1490,6 +1480,11 @@ function renderBulkModal() {
       <div class="bulk-hint">${hint}</div>
     </div>`;
 
+  mountProjectPicker(document.getElementById('bulkProjHost'), {
+    id: 'bulkProjSel', value: _bulk.projId || '', needsPeriod: true,
+    getRange: () => ({ lo: ymOf(state.year, 1), hi: ymOf(state.year, 12) }),
+    getMemberId: () => _bulk.memberId,
+  });
   document.getElementById('bulkProjSel').onchange = e => {
     _bulk.projId = e.target.value || null; _bulk.start = null; _bulk.end = null; _bulk.mmVals = {};
     renderBulkModal();
@@ -2406,6 +2401,129 @@ document.getElementById('exportPdf').onclick = () => { _exportDropdown.classList
 document.addEventListener('click', e => {
   if (!e.target.closest('#exportWrap')) _exportDropdown.classList.add('hidden');
 });
+
+// ─── 공통 프로젝트 선택 콤보박스: 검색 + 옵션(완료 포함/기간 내만) + 상태 그룹 ───
+// 숨은 input(id)에 값을 담고 선택 시 change 이벤트를 발생시켜, 기존 .value/change 소비 코드를 그대로 쓴다.
+const _ppOpts = (() => {
+  const d = { includeDone: false, periodOnly: true };
+  try { return { ...d, ...JSON.parse(localStorage.getItem('wfm_ppOpts') || '{}') }; } catch (e) { return d; }
+})();
+const _ppSave = () => { try { localStorage.setItem('wfm_ppOpts', JSON.stringify(_ppOpts)); } catch (e) {} };
+const PP_STATUS_ORDER = ['active', 'planned', 'done'];
+
+function _ppList({ range, memberId, selectedId, query, needsPeriod, ignoreOpts }) {
+  const q = (query || '').trim().toLowerCase();
+  const overlaps = p => {
+    if (!p.start || !p.end) return null;
+    const [sy, sm] = p.start.split('-').map(Number), [ey, em] = p.end.split('-').map(Number);
+    return ymOf(sy, sm) <= range.hi && ymOf(ey, em) >= range.lo;
+  };
+  const busy = new Set(memberId ? DATA.assignments
+    .filter(a => a.memberId === memberId && ymOf(a.year, a.month) >= range.lo && ymOf(a.year, a.month) <= range.hi)
+    .map(a => a.projectId) : []);
+  const match = p => !q || `${p.name} ${p.client || ''}`.toLowerCase().includes(q);
+  const items = DATA.projects.filter(p => {
+    if (!match(p)) return false;
+    if (p.id === selectedId) return true;
+    const ov = overlaps(p);
+    if (needsPeriod && ov === null) return false;
+    if (ignoreOpts) return true;
+    if (!_ppOpts.includeDone && p.status === 'done') return false;
+    if (_ppOpts.periodOnly && ov === false) return false;
+    return true;
+  }).map(p => ({ p, busy: busy.has(p.id), noPeriod: !p.start || !p.end }));
+  const rank = it => {
+    const g = PP_STATUS_ORDER.indexOf(it.p.status); return g < 0 ? PP_STATUS_ORDER.length : g;
+  };
+  items.sort((a, b) => rank(a) - rank(b) || (b.busy - a.busy) || a.p.name.localeCompare(b.p.name, 'ko'));
+  return items;
+}
+
+function mountProjectPicker(host, { id, value, getRange, getMemberId, needsPeriod = false, placeholder = '프로젝트 검색·선택' }) {
+  host.innerHTML = `<div class="pp-wrap"><input type="hidden" id="${id}" value="${esc(value || '')}">
+    <button type="button" class="pp-btn form-select"><span class="pp-label"></span><span class="pp-caret">▾</span></button></div>`;
+  const hidden = host.querySelector('input'), btn = host.querySelector('.pp-btn'), lbl = host.querySelector('.pp-label');
+  const labelOf = pid => { const p = getProject(pid); return p ? `${p.name}${p.client ? ' (' + p.client + ')' : ''}` : ''; };
+  const paint = () => { const t = labelOf(hidden.value); lbl.textContent = t || placeholder; lbl.classList.toggle('pp-ph', !t); };
+  paint();
+
+  let dd = null, hi = 0, items = [];
+  const close = () => {
+    if (!dd) return;
+    dd.remove(); dd = null;
+    document.removeEventListener('mousedown', onOutside, true);
+    window.removeEventListener('resize', close);
+    document.removeEventListener('scroll', onScroll, true);
+  };
+  const onOutside = e => { if (dd && !dd.contains(e.target) && !btn.contains(e.target)) close(); };
+  const onScroll = e => { if (dd && !dd.contains(e.target)) close(); };
+  const pick = pid => {
+    hidden.value = pid || ''; paint(); close(); btn.focus({ preventScroll: true });
+    hidden.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+
+  const open = () => {
+    if (dd) return close();
+    dd = document.createElement('div'); dd.className = 'pp-dd';
+    dd.innerHTML = `<input type="text" class="pp-search" placeholder="프로젝트명·고객사 검색" autocomplete="off">
+      <div class="pp-list" role="listbox"></div>
+      <div class="pp-opts"><label><input type="checkbox" data-o="includeDone"> 완료 포함</label><label><input type="checkbox" data-o="periodOnly"> 기간 내만</label></div>`;
+    document.body.appendChild(dd);
+    const search = dd.querySelector('.pp-search'), list = dd.querySelector('.pp-list');
+    dd.querySelectorAll('.pp-opts input').forEach(c => { c.checked = !!_ppOpts[c.dataset.o]; });
+
+    const ctx = ignoreOpts => ({ range: getRange(), memberId: getMemberId && getMemberId(), selectedId: hidden.value, query: search.value, needsPeriod, ignoreOpts });
+    const render = () => {
+      items = _ppList(ctx(false));
+      let html = '';
+      html += `<div class="pp-item pp-none" data-id="">선택 안 함</div>`;
+      let g = null;
+      items.forEach((it, i) => {
+        if (it.p.status !== g) { g = it.p.status; html += `<div class="pp-group">${esc(STATUS_KR[g] || g || '기타')}</div>`; }
+        html += `<div class="pp-item${i === hi ? ' pp-hi' : ''}${it.p.id === hidden.value ? ' pp-sel' : ''}" role="option" data-i="${i}" data-id="${esc(it.p.id)}">
+          <span class="pp-dot" style="background:${esc(it.p.color || '#999')}"></span>
+          <span class="pp-name">${esc(it.p.name)}<small>${esc(it.p.client || '')}</small></span>
+          ${it.busy ? '<em class="pp-badge">투입중</em>' : ''}${it.noPeriod ? '<em class="pp-badge pp-badge-mute">기간 미정</em>' : ''}</div>`;
+      });
+      if (!items.length) {
+        const hiddenCnt = _ppList(ctx(true)).length;
+        html += hiddenCnt ? `<div class="pp-empty">검색 결과 없음 · <button type="button" class="pp-more">숨겨진 ${hiddenCnt}개 포함하여 보기</button></div>` : '<div class="pp-empty">검색 결과 없음</div>';
+      }
+      list.innerHTML = html;
+      const cur = list.querySelector('.pp-hi'); if (cur) cur.scrollIntoView({ block: 'nearest' });
+    };
+
+    // 위치: 버튼 아래(공간 부족하면 위)
+    const r = btn.getBoundingClientRect(), below = innerHeight - r.bottom - 12, h = 300;
+    dd.style.minWidth = r.width + 'px'; dd.style.left = Math.min(r.left, innerWidth - r.width - 8) + 'px';
+    if (below >= 200 || below >= r.top) { dd.style.top = r.bottom + 4 + 'px'; dd.style.maxHeight = Math.min(h, below) + 'px'; }
+    else { dd.style.bottom = innerHeight - r.top + 4 + 'px'; dd.style.maxHeight = Math.min(h, r.top - 12) + 'px'; }
+
+    render(); search.focus();
+    document.addEventListener('mousedown', onOutside, true);
+    window.addEventListener('resize', close);
+    document.addEventListener('scroll', onScroll, true);
+
+    search.addEventListener('input', () => { hi = 0; render(); });
+    search.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { e.stopPropagation(); close(); btn.focus({ preventScroll: true }); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); hi = Math.min(items.length - 1, hi + 1); render(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); hi = Math.max(0, hi - 1); render(); }
+      else if (e.key === 'Enter') { e.preventDefault(); if (items[hi]) pick(items[hi].p.id); }
+      else if (e.key === 'Tab') close();
+    });
+    list.addEventListener('mousemove', e => { const it = e.target.closest('.pp-item[data-i]'); if (it && +it.dataset.i !== hi) { hi = +it.dataset.i; list.querySelectorAll('.pp-hi').forEach(x => x.classList.remove('pp-hi')); it.classList.add('pp-hi'); } });
+    list.addEventListener('click', e => {
+      if (e.target.closest('.pp-more')) { _ppOpts.includeDone = true; _ppOpts.periodOnly = false; _ppSave(); dd.querySelectorAll('.pp-opts input').forEach(c => { c.checked = !!_ppOpts[c.dataset.o]; }); render(); return; }
+      const it = e.target.closest('.pp-item'); if (it) pick(it.dataset.id);
+    });
+    dd.querySelector('.pp-opts').addEventListener('change', e => { const o = e.target.dataset.o; if (!o) return; _ppOpts[o] = e.target.checked; _ppSave(); hi = 0; render(); search.focus(); });
+  };
+
+  btn.addEventListener('click', open);
+  btn.addEventListener('keydown', e => { if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); if (!dd) open(); } });
+  return { close, repaint: paint };
+}
 
 // ─── 투입 팝업: 월 헤더/라벨 열을 끌면 12개월 창을 이동 (계획·실제 행의 드래그는 기간 선택 전용) ───
 (function enableMAFormPan() {
