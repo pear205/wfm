@@ -55,6 +55,7 @@ const CUR_MONTH = TODAY.getMonth() + 1;
 
 const state = {
   year: CUR_YEAR,
+  _center: true,   // 다음 연도별 렌더 때 현재 달(또는 기준 연도 1월)로 스크롤
   viewMode: 'year',
   theme: 'system',
   mgmtTab: 'members',
@@ -444,6 +445,22 @@ function renderYearView() {
 
   html += `</tbody></table>`;
   document.getElementById('grid-container').innerHTML = html;
+  if (state._center) { state._center = false; requestAnimationFrame(centerYearGrid); }
+}
+
+// 올해면 현재 달을 보이는 영역 가운데로, 다른 해면 기준 연도 1월을 고정 컬럼 바로 옆으로
+function centerYearGrid() {
+  const gw = document.getElementById('grid-wrap');
+  const target = state.year === CUR_YEAR ? CUR_MONTH : 1;
+  const th = document.querySelector(`.year-table th.th-month[data-year="${state.year}"][data-month="${target}"]`);
+  const mem = document.querySelector('.year-table th.col-member'), ann = document.querySelector('.year-table th.col-annual');
+  if (!gw || !th || !mem || !ann) return;
+  const gutter = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--gutter')) || 16;
+  const left = gutter + mem.offsetWidth, right = gutter + ann.offsetWidth;
+  const r = th.getBoundingClientRect(), g = gw.getBoundingClientRect();
+  const cx = r.left - g.left + r.width / 2;
+  const want = state.year === CUR_YEAR ? (left + gw.clientWidth - right) / 2 : left + r.width / 2;
+  gw.scrollLeft += cx - want;
 }
 
 
@@ -1096,31 +1113,30 @@ function closeFormModal() { Modal.close('formModal'); }
 // ═══════════════════════════════════════════════════════════
 // MEMBER-ASSIGN FORM (투입 공수 설정)
 // ═══════════════════════════════════════════════════════════
-const _maForm = { gaps: new Set(), dragAnchor: null, start: null, end: null, mmVals: {}, actualVals: {}, dragging: false, dragMoved: false, actStart: null, actEnd: null, actDragging: false, actDragMoved: false };
+const _maForm = { winStart: 0, focusYm: null, pan: null, gaps: new Set(), dragAnchor: null, start: null, end: null, mmVals: {}, actualVals: {}, dragging: false, dragMoved: false, actStart: null, actEnd: null, actDragging: false, actDragMoved: false };
 
 function renderMAFormTrack() {
   const projectId = document.getElementById('maFProject')?.value || state.formMode?.id;
   const pj = getProject(projectId);
-  const year = state.year;
-
-  const enabledSet = new Set([1,2,3,4,5,6,7,8,9,10,11,12]);
+  const win = Array.from({length: 12}, (_, i) => _maForm.winStart + i);
 
   const ps = _maForm.start === null ? 99 : Math.min(_maForm.start, _maForm.end ?? _maForm.start);
   const pe = _maForm.end   === null ? -1 : Math.max(_maForm.start ?? 0, _maForm.end);
   const as = _maForm.actStart === null ? 99 : Math.min(_maForm.actStart, _maForm.actEnd ?? _maForm.actStart);
   const ae = _maForm.actEnd   === null ? -1 : Math.max(_maForm.actStart ?? 0, _maForm.actEnd);
 
-  // Header row: empty label + 12 month headers
+  // Header row: empty label + 12 month headers (1월 또는 첫 칸에는 연도 표시)
   let hdrHtml = '<div class="ma-row-lbl"></div>';
-  for (let m = 1; m <= 12; m++) {
-    hdrHtml += `<div class="ma-month-hdr">${MONTH_KR[m-1]}</div>`;
-  }
+  win.forEach((ym, i) => {
+    const { y, m } = ymParts(ym);
+    hdrHtml += `<div class="ma-month-hdr">${MONTH_KR[m-1]}<small>${(m === 1 || i === 0) ? y : '&nbsp;'}</small></div>`;
+  });
 
   // Plan row
   let planHtml = '<div class="ma-row-lbl plan-lbl">계획</div>';
-  for (let m = 1; m <= 12; m++) {
-    const enabled = enabledSet.has(m);
-    const inRange = enabled && m >= ps && m <= pe && !_maForm.gaps.has(m);
+  for (const m of win) {
+    const enabled = true;
+    const inRange = m >= ps && m <= pe && !_maForm.gaps.has(m);
     const mv = _maForm.mmVals[m] ?? 1.0;
     let barStyle = '', valHtml = '';
     if (inRange && pj) {
@@ -1140,7 +1156,7 @@ function renderMAFormTrack() {
 
   // Actual row
   let actHtml = '<div class="ma-row-lbl act-lbl">실제</div>';
-  for (let m = 1; m <= 12; m++) {
+  for (const m of win) {
     const inActRange = m >= as && m <= ae;
     const av = _maForm.actualVals[m] || 0;
     let barStyle = '', valHtml = '';
@@ -1166,12 +1182,15 @@ function renderMAFormTrack() {
   let hint = pj ? '계획: 드래그로 기간 선택 · 스크롤로 값 조정 | 실제: 드래그 후 스크롤' : '프로젝트를 먼저 선택하세요';
   if (pj && _maForm.start !== null) {
     let planTotal = 0, actTotal = 0;
-    for (let m = ps; m <= pe; m++) if (enabledSet.has(m) && !_maForm.gaps.has(m)) planTotal += _maForm.mmVals[m] ?? 1;
-    for (let m = 1; m <= 12; m++) actTotal += _maForm.actualVals[m] || 0;
-    hint = `계획 ${ps}월~${pe}월 · ${fmt(planTotal)} M/M` + (actTotal > 0 ? ` · 실제 합계 ${fmt(actTotal)} M/M` : '');
+    for (let m = ps; m <= pe; m++) if (!_maForm.gaps.has(m)) planTotal += _maForm.mmVals[m] ?? 1;
+    for (const k in _maForm.actualVals) actTotal += _maForm.actualVals[k] || 0;
+    const lbl = ym => { const p = ymParts(ym); return `${p.y}.${String(p.m).padStart(2, '0')}`; };
+    hint = `계획 ${lbl(ps)}~${lbl(pe)} · ${fmt(planTotal)} M/M` + (actTotal > 0 ? ` · 실제 합계 ${fmt(actTotal)} M/M` : '');
   }
   const hintEl = document.getElementById('maFHint');
   if (hintEl) hintEl.textContent = hint;
+  const wl = document.getElementById('maFWinLbl');
+  if (wl) { const a = ymParts(win[0]), b = ymParts(win[11]); wl.textContent = `${a.y}.${String(a.m).padStart(2,'0')} ~ ${b.y}.${String(b.m).padStart(2,'0')}`; }
 }
 
 function _loadMAFormExisting() {
@@ -1182,32 +1201,39 @@ function _loadMAFormExisting() {
   state.formMode.id = projectId || null;
   if (!memberId || !projectId) return;
   const existAs = DATA.assignments.filter(a =>
-    a.memberId === memberId && a.projectId === projectId && a.year === state.year);
+    a.memberId === memberId && a.projectId === projectId);
   existAs.forEach(a => {
-    _maForm.mmVals[a.month]     = a.mm_plan != null ? a.mm_plan : (a.mm || 0);
-    _maForm.actualVals[a.month] = a.mm_actual || 0;
+    const k = ymOf(a.year, a.month);
+    _maForm.mmVals[k]     = a.mm_plan != null ? a.mm_plan : (a.mm || 0);
+    _maForm.actualVals[k] = a.mm_actual || 0;
   });
   if (existAs.length) {
     const typeRadio = [...document.querySelectorAll('input[name="maFType"]')].find(r => r.value === existAs[0].type);
     if (typeRadio) typeRadio.checked = true;
-    const months = existAs.map(a => a.month);
+    const months = existAs.map(a => ymOf(a.year, a.month));
     _maForm.start = Math.min(...months);
     _maForm.end   = Math.max(...months);
     for (let m = _maForm.start; m <= _maForm.end; m++) if (!months.includes(m)) _maForm.gaps.add(m);
-    const actMonths = existAs.filter(a => (a.mm_actual||0) > 0).map(a => a.month);
+    const actMonths = existAs.filter(a => (a.mm_actual||0) > 0).map(a => ymOf(a.year, a.month));
     if (actMonths.length) {
       _maForm.actStart = Math.min(...actMonths);
       _maForm.actEnd   = Math.max(...actMonths);
     }
   }
+  // 창 시작: 클릭한 셀이 있으면 그 달 2개월 앞, 없으면 투입 시작월, 둘 다 없으면 기준 연도 1월
+  const anchor = _maForm.focusYm ?? _maForm.start;
+  _maForm.winStart = anchor == null ? ymOf(state.year, 1) : anchor - (_maForm.focusYm != null ? 2 : 0);
+  _maForm.focusYm = null;
   // show/hide delete button
   const formDeleteBtn = document.getElementById('formDeleteBtn');
   if (existAs.length > 0) { formDeleteBtn.classList.remove('hidden'); formDeleteBtn.style.display = ''; }
   else { formDeleteBtn.classList.add('hidden'); }
 }
 
-function openMemberAssignForm(projectId, memberId) {
+function openMemberAssignForm(projectId, memberId, focusYm) {
   state.formMode = {type:'memberAssign', id: projectId||null, editMemberId: memberId||null};
+  _maForm.focusYm = focusYm ?? null;
+  _maForm.winStart = focusYm != null ? focusYm - 2 : ymOf(state.year, 1);
   document.getElementById('formTitle').textContent = '멤버 투입';
   document.getElementById('formDeleteBtn').classList.add('hidden');
 
@@ -1245,11 +1271,19 @@ function openMemberAssignForm(projectId, memberId) {
     </div>
     <div class="form-group" style="margin-bottom:4px">
       <label class="form-label">적용 기간 — 드래그로 범위 선택 · 클릭으로 공수 조정 (0.25/0.5/0.75/1.0)</label>
+      <div class="ma-win-nav">
+        <button type="button" class="btn-ghost-xs" id="maFPrev" title="6개월 이전">◀ 6개월</button>
+        <span id="maFWinLbl"></span>
+        <button type="button" class="btn-ghost-xs" id="maFNext" title="6개월 이후">6개월 ▶</button>
+      </div>
       <div id="maFTrack" style="border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:6px;padding:4px"></div>
       <div class="bulk-hint" id="maFHint">프로젝트를 먼저 선택하세요</div>
     </div>`;
 
   if (memberId) document.getElementById('maFMember').value = memberId;
+
+  document.getElementById('maFPrev').onclick = () => { _maForm.winStart -= 6; renderMAFormTrack(); };
+  document.getElementById('maFNext').onclick = () => { _maForm.winStart += 6; renderMAFormTrack(); };
 
   // Member / Project change → reload existing data
   document.getElementById('maFMember').addEventListener('change', () => { _loadMAFormExisting(); renderMAFormTrack(); });
@@ -1322,24 +1356,30 @@ function saveMemberAssignForm() {
   const projectId = document.getElementById('maFProject')?.value || state.formMode?.id;
   if (!memberId || !projectId) return;
 
-  const year = state.year;
   const type = document.querySelector('input[name="maFType"]:checked')?.value || '상주';
   const s = _maForm.start === null ? null : Math.min(_maForm.start, _maForm.end ?? _maForm.start);
   const e = _maForm.end   === null ? null : Math.max(_maForm.start ?? 0, _maForm.end);
 
-  for (let m = 1; m <= 12; m++) {
-    const ex  = DATA.assignments.find(a => a.memberId===memberId && a.projectId===projectId && a.year===year && a.month===m);
-    const act = _maForm.actualVals[m] || 0;
-    const inPlan = s !== null && m >= s && m <= e && !_maForm.gaps.has(m);
+  const existing = new Map(DATA.assignments
+    .filter(a => a.memberId === memberId && a.projectId === projectId)
+    .map(a => [ymOf(a.year, a.month), a]));
+  const keys = new Set([...existing.keys(), ...Object.keys(_maForm.actualVals).map(Number)]);
+  if (s !== null) for (let k = s; k <= e; k++) keys.add(k);
+
+  keys.forEach(k => {
+    const { y, m } = ymParts(k);
+    const ex  = existing.get(k);
+    const act = _maForm.actualVals[k] || 0;
+    const inPlan = s !== null && k >= s && k <= e && !_maForm.gaps.has(k);
     if (inPlan) {
-      const plan = _maForm.mmVals[m] ?? 1.0;
-      DataAPI.setAssignment(memberId, projectId, year, m, plan, act > 0 ? act : (ex ? 0 : plan), type);
+      const plan = _maForm.mmVals[k] ?? 1.0;
+      DataAPI.setAssignment(memberId, projectId, y, m, plan, act > 0 ? act : (ex ? 0 : plan), type);
     } else if (act > 0) {
-      DataAPI.setAssignment(memberId, projectId, year, m, 0, act, type);
+      DataAPI.setAssignment(memberId, projectId, y, m, 0, act, type);
     } else if (ex) {
-      DataAPI.deleteAssignment(memberId, projectId, year, m);
+      DataAPI.deleteAssignment(memberId, projectId, y, m);
     }
-  }
+  });
   closeFormModal();
   render();
   _afterMutate();
@@ -1650,6 +1690,7 @@ function renderHeaderControls() {
 
 function switchView(mode) {
   state.viewMode = mode;
+  if (mode === 'year') state._center = true;
   state.memberFilter = '';
   state.projectFilter = '';
   state.benchMemberFilter = '';
@@ -1683,8 +1724,8 @@ function render() {
 // EVENTS
 // ═══════════════════════════════════════════════════════════
 // Year nav
-document.getElementById('prevYear').onclick = () => { state.year--; render(); };
-document.getElementById('nextYear').onclick = () => { state.year++; render(); };
+document.getElementById('prevYear').onclick = () => { state.year--; state._center = true; render(); };
+document.getElementById('nextYear').onclick = () => { state.year++; state._center = true; render(); };
 
 // View toggle
 document.getElementById('btnYear').onclick   = () => switchView('year');
@@ -1925,7 +1966,13 @@ document.getElementById('grid-container').addEventListener('click', e => {
 
   // Project bar → open member assign form for editing
   const bar = e.target.closest('.proj-bar[data-member]');
-  if (bar) { e.stopPropagation(); openMemberAssignForm(bar.dataset.project, bar.dataset.member); return; }
+  if (bar) {
+    e.stopPropagation();
+    let focus = null;
+    try { const k = JSON.parse(bar.dataset.assign); focus = ymOf(k.y, k.mo); } catch (_) {}
+    openMemberAssignForm(bar.dataset.project, bar.dataset.member, focus);
+    return;
+  }
 
   // Month header click → switch to month view
   const benchMo = e.target.closest('[data-bench-mo]');
@@ -2041,7 +2088,7 @@ document.getElementById('formDeleteBtn').onclick = function() {
       const editMemberId = document.getElementById('maFMember')?.value;
       const projectId    = document.getElementById('maFProject')?.value || state.formMode?.id;
       if (editMemberId && projectId) {
-        for (let m = 1; m <= 12; m++) DataAPI.deleteAssignment(editMemberId, projectId, state.year, m);
+        yearWindow(state.year).forEach(c => DataAPI.deleteAssignment(editMemberId, projectId, c.y, c.m));
       }
       closeFormModal(); render(); _afterMutate();
     }
@@ -2327,6 +2374,25 @@ document.getElementById('exportPdf').onclick = () => { _exportDropdown.classList
 document.addEventListener('click', e => {
   if (!e.target.closest('#exportWrap')) _exportDropdown.classList.add('hidden');
 });
+
+// ─── 투입 팝업: 월 헤더/라벨 열을 끌면 12개월 창을 이동 (계획·실제 행의 드래그는 기간 선택 전용) ───
+(function enableMAFormPan() {
+  const root = document.getElementById('formModal');
+  root.addEventListener('mousedown', e => {
+    if (e.button !== 0 || !e.target.closest('#maFTrack .ma-month-hdr, #maFTrack .ma-row-lbl')) return;
+    const cell = root.querySelector('#maFTrack .ma-month-hdr');
+    _maForm.pan = { x: e.clientX, ws: _maForm.winStart, colW: cell ? cell.getBoundingClientRect().width + 3 : 40 };
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', e => {
+    const p = _maForm.pan;
+    if (!p) return;
+    const ws = p.ws - Math.round((e.clientX - p.x) / p.colW);
+    if (ws !== _maForm.winStart) { _maForm.winStart = ws; renderMAFormTrack(); }
+    root.classList.add('is-panning-ma');
+  });
+  window.addEventListener('mouseup', () => { _maForm.pan = null; root.classList.remove('is-panning-ma'); });
+})();
 
 // ─── 표 영역 끌어서 스크롤 (마우스; 터치는 브라우저 기본 동작 사용) ───
 (function enableGridPan() {

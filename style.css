@@ -641,3 +641,10 @@ button{cursor:pointer;border:none;background:none;font-family:inherit}
 .year-table th.th-month.is-pad .mo-label{color:var(--text-m)}
 .year-table th.grid-total-cell.is-pad{opacity:.6}
 .year-table th.yr-start,.year-table td.yr-start{border-left:2px solid var(--border-strong)}
+
+/* ─── 투입 팝업: 12개월 창 이동 ─── */
+.ma-win-nav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:2px 0 6px;font-size:11px;color:var(--text-s);font-family:'JetBrains Mono',monospace}
+.ma-month-hdr{line-height:1.15}
+.ma-month-hdr small{display:block;font-size:8px;color:var(--text-m)}
+.ma-month-hdr,#maFTrack .ma-row-lbl{cursor:grab}
+#formModal.is-panning-ma,#formModal.is-panning-ma *{cursor:grabbing!important;user-select:none}
