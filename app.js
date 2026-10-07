@@ -2312,6 +2312,54 @@ document.addEventListener('click', e => {
   if (!e.target.closest('#exportWrap')) _exportDropdown.classList.add('hidden');
 });
 
+// ─── 표 영역 끌어서 스크롤 (마우스; 터치는 브라우저 기본 동작 사용) ───
+(function enableGridPan() {
+  const gw = document.getElementById('grid-wrap');
+  const THRESHOLD = 5;
+  let st = null, raf = 0;
+  const stopFling = () => { cancelAnimationFrame(raf); raf = 0; };
+
+  gw.addEventListener('pointerdown', e => {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return;
+    if (e.target.closest('input,select,textarea,a,label')) return;
+    stopFling();
+    st = { x: e.clientX, y: e.clientY, sl: gw.scrollLeft, stp: gw.scrollTop, moved: false, vx: 0, vy: 0, lx: e.clientX, ly: e.clientY, lt: e.timeStamp };
+  });
+
+  window.addEventListener('pointermove', e => {
+    if (!st) return;
+    const dx = e.clientX - st.x, dy = e.clientY - st.y;
+    if (!st.moved) {
+      if (Math.abs(dx) < THRESHOLD && Math.abs(dy) < THRESHOLD) return;
+      st.moved = true; gw.classList.add('is-panning');
+    }
+    gw.scrollLeft = st.sl - dx; gw.scrollTop = st.stp - dy;
+    const dt = Math.max(1, e.timeStamp - st.lt);
+    st.vx = (e.clientX - st.lx) / dt; st.vy = (e.clientY - st.ly) / dt;
+    st.lx = e.clientX; st.ly = e.clientY; st.lt = e.timeStamp;
+  });
+
+  const end = e => {
+    if (!st) return;
+    const s = st; st = null;
+    gw.classList.remove('is-panning');
+    if (!s.moved) return;
+    const swallow = ev => { ev.stopPropagation(); ev.preventDefault(); };
+    window.addEventListener('click', swallow, { capture: true, once: true });
+    setTimeout(() => window.removeEventListener('click', swallow, true), 0);
+    if (e.timeStamp - s.lt > 80) return;
+    let vx = -s.vx * 16, vy = -s.vy * 16;
+    const step = () => {
+      gw.scrollLeft += vx; gw.scrollTop += vy;
+      vx *= 0.94; vy *= 0.94;
+      raf = (Math.abs(vx) > 0.4 || Math.abs(vy) > 0.4) ? requestAnimationFrame(step) : 0;
+    };
+    raf = requestAnimationFrame(step);
+  };
+  window.addEventListener('pointerup', end);
+  window.addEventListener('pointercancel', end);
+})();
+
 // ─── Init ───
 (async function() {
   try {

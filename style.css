@@ -631,3 +631,7 @@ button{cursor:pointer;border:none;background:none;font-family:inherit}
 .db-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{transition-duration:.01ms!important;animation-duration:.01ms!important}}
+
+/* 표 끌어서 스크롤 중 */
+#grid-wrap.is-panning,#grid-wrap.is-panning *{cursor:grabbing!important;user-select:none}
+#grid-wrap.is-panning .proj-bar{pointer-events:none}
