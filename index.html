@@ -28,19 +28,20 @@
     </div>
     <div class="hd-sep"></div>
     <div class="hd-nav">
-      <button class="hd-nav-btn" id="prevYear">‹</button>
-      <span class="hd-year" id="yearDisplay">2026</span>
-      <button class="hd-nav-btn" id="nextYear">›</button>
+      <button class="hd-nav-btn" id="prevYear" aria-label="이전 연도">‹</button>
+      <span class="hd-year" id="yearDisplay" aria-live="polite">2026</span>
+      <button class="hd-nav-btn" id="nextYear" aria-label="다음 연도">›</button>
+      <button class="hd-nav-btn hd-today" id="btnToday" title="오늘(현재 월)로 이동">오늘</button>
     </div>
     <div class="hd-spacer"></div>
-    <div class="view-toggle">
-      <button id="btnYear" class="active">연도별</button>
-      <button id="btnBench">가용인력</button>
-      <button id="btnWisenm">WiseNTM</button>
+    <div class="view-toggle" role="group" aria-label="화면 선택">
+      <button id="btnYear" class="active" aria-pressed="true">투입 현황</button>
+      <button id="btnBench" aria-pressed="false">가용인력</button>
+      <button id="btnWisenm" aria-pressed="false" title="WiseN TM 공수 산정">공수 산정</button>
     </div>
     <div class="hd-sep"></div>
     <button class="hd-mgmt-btn" id="btnMgmt">⚙ 관리</button>
-    <button class="hd-icon-btn" id="themeToggle" title="다크모드">☀</button>
+    <button class="hd-icon-btn" id="themeToggle" title="다크모드" aria-label="다크모드 전환">☀</button>
   </header>
 
   <div id="subheader" class="hidden"></div>
@@ -58,15 +59,18 @@
     <label class="filter-bar-check" title="기준 연도 앞뒤 6개월을 연하게 함께 표시 (KPI·연간 가용은 기준 연도만 집계)">
       <input type="checkbox" id="showPadMonths" checked>앞뒤 기간 보기
     </label>
+    <label class="filter-bar-check" title="막대·숫자 글씨를 키움">
+      <input type="checkbox" id="largeText">큰 글씨
+    </label>
     <div class="filter-bar-sep"></div>
     <select id="projFilter" class="filter-bar-select">
       <option value="">프로젝트 전체</option>
     </select>
     <div class="filter-bar-sep"></div>
-    <div class="assign-mode-seg" id="assignModeSeg">
-      <button class="amseg-btn" data-amode="plan">계획</button>
-      <button class="amseg-btn active" data-amode="actual">실제</button>
-      <button class="amseg-btn" data-amode="both">비교</button>
+    <div class="assign-mode-seg" id="assignModeSeg" role="group" aria-label="공수 기준">
+      <button class="amseg-btn" data-amode="plan" aria-pressed="false" title="계획 공수만 표시">계획</button>
+      <button class="amseg-btn active" data-amode="actual" aria-pressed="true" title="실제 공수 표시 (실제 미입력은 계획으로 대체해 연하게 표시)">실제</button>
+      <button class="amseg-btn" data-amode="both" aria-pressed="false" title="실제와 계획을 함께 표시">비교</button>
     </div>
     <label class="filter-bar-check">
       <input type="checkbox" id="showAllowanceCheck">현장수당
@@ -105,26 +109,26 @@
 <!-- Bottom panels -->
 <div id="spark-tooltip"></div>
 <div id="overlay"></div>
-<div class="detail-panel" id="projectPanel">
+<div class="detail-panel" id="projectPanel" role="dialog" aria-label="프로젝트 상세" inert>
   <div class="panel-inner">
     <div class="panel-handle" id="projHandle"></div>
-    <button class="panel-close" id="projClose">✕</button>
+    <button class="panel-close" id="projClose" aria-label="닫기">✕</button>
     <div id="projectPanelContent"></div>
   </div>
 </div>
-<div class="detail-panel" id="memberPanel">
+<div class="detail-panel" id="memberPanel" role="dialog" aria-label="멤버 상세" inert>
   <div class="panel-inner">
     <div class="panel-handle" id="memHandle"></div>
-    <button class="panel-close" id="memClose">✕</button>
+    <button class="panel-close" id="memClose" aria-label="닫기">✕</button>
     <div id="memberPanelContent"></div>
   </div>
 </div>
 
 <!-- Management drawer -->
-<div class="drawer" id="mgmtDrawer">
+<div class="drawer" id="mgmtDrawer" role="dialog" aria-label="관리" inert>
   <div class="drawer-header">
     <span class="drawer-title">관리</span>
-    <button class="drawer-close" id="mgmtClose">✕</button>
+    <button class="drawer-close" id="mgmtClose" aria-label="닫기">✕</button>
   </div>
   <div class="drawer-tabs">
     <button class="dtab active" data-tab="members">멤버</button>
@@ -143,7 +147,7 @@
   <div class="modal-card" style="max-width:580px">
     <div class="modal-header">
       <span class="modal-title" id="formTitle">멤버 추가</span>
-      <button class="modal-close-btn" id="formClose">✕</button>
+      <button class="modal-close-btn" id="formClose" aria-label="닫기">✕</button>
     </div>
     <div class="modal-body">
       <div id="formContent"></div>
@@ -162,7 +166,7 @@
   <div class="modal-card modal-sm">
     <div class="modal-header">
       <span class="modal-title" id="assignTitle">공수 관리</span>
-      <button class="modal-close-btn" id="assignClose">✕</button>
+      <button class="modal-close-btn" id="assignClose" aria-label="닫기">✕</button>
     </div>
     <div class="modal-body" id="assignBody"></div>
   </div>
@@ -173,7 +177,7 @@
   <div class="modal-card modal-lg">
     <div class="modal-header">
       <span class="modal-title" id="bulkTitle">일괄 공수 입력</span>
-      <button class="modal-close-btn" id="bulkClose">✕</button>
+      <button class="modal-close-btn" id="bulkClose" aria-label="닫기">✕</button>
     </div>
     <div class="modal-body" id="bulkBody"></div>
     <div class="modal-footer">

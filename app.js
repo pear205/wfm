@@ -5,6 +5,14 @@
 // ─── XSS escape helper ───
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
+// ─── 막대/멤버 셀 키보드 조작: Enter·Space = 클릭, Delete = 막대 삭제 ───
+document.addEventListener('keydown', e => {
+  const t = e.target;
+  if (!t.matches?.('.proj-bar[role="button"], .member-cell[role="button"]')) return;
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); t.click(); }
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && t.classList.contains('proj-bar')) { e.preventDefault(); t.querySelector('.proj-bar-del')?.click(); }
+});
+
 // ─── 입력 검증 ───
 // 공수: 0~2, 0.05 단위(기존 입력창 규칙). 빈 값은 empty, 잘못된 값은 error
 // keep: 기존 저장값과 같으면 단위 검증을 면제 (다른 필드만 고칠 때 막지 않음)
@@ -54,6 +62,18 @@ const Modal = {
   },
 };
 document.addEventListener('mousedown', e => { Modal._down = e.target; });
+// Tab 이 모달 밖으로 나가지 않게 가장 위 모달 안에서 순환
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Tab') return;
+  const id = Modal._stack[Modal._stack.length - 1];
+  const card = id && document.querySelector('#' + id + ' .modal-card');
+  if (!card || !card.contains(e.target)) return;
+  const f = [...card.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]):not([type=hidden]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')].filter(el => el.offsetParent !== null);
+  if (!f.length) return;
+  const first = f[0], last = f[f.length - 1];
+  if (e.shiftKey && e.target === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && e.target === last) { e.preventDefault(); first.focus(); }
+});
 document.addEventListener('click', e => {
   const t = e.target;
   if (t.classList?.contains('modal-overlay') && Modal._down === t && t.dataset.backdrop === 'close') Modal.close(t.id);
@@ -296,7 +316,7 @@ function renderYearView() {
   const _availDispCol = _teamAvail<0?'var(--over)':_teamAvail===0?'var(--ok)':'var(--warn)';
   const _totalCol = _teamAvail<0?'var(--over)':_teamAvail===0?'var(--ok)':'var(--warn)';
 
-  const _scopeTxt = `집계 기준 ${year}년 1~12월 · ${filtered ? `필터 적용 ${visibleMembers.length}/${DATA.members.length}명` : `전체 ${DATA.members.length}명`} · ${{plan:'계획',actual:'실제(미입력은 계획)',both:'실제(미입력은 계획)'}[state.assignMode] || ''} 기준`;
+  const _scopeTxt = `집계 기준 ${year}년 1~12월 · ${filtered ? `필터 적용 ${visibleMembers.length}/${DATA.members.length}명` : `전체 ${DATA.members.length}명`} · ${{plan:'막대 = 계획 공수',actual:'진한 막대 = 실제, 연한 막대 = 실제 미입력(계획으로 표시)',both:'진한 = 실제 · 연한 = 계획 잔여 · 빨간 테두리 = 계획 초과'}[state.assignMode] || ''}`;
   document.getElementById('kpi-wrap').innerHTML = `<div class="kpi-panel"><div class="kpi-cards">
     <div class="kpi-card" title="재직 인원 기준 연간 투입 합계"><div class="kpi-card__label">연간 팀 M/M</div><div class="kpi-card__value" style="color:${_totalCol}">${_teamTotal.toFixed(1)}</div></div>
     <div class="kpi-card" title="투입 합계 ÷ 재직 용량"><div class="kpi-card__label">평균 가동률</div><div class="kpi-card__value">${_utilPct}%</div></div>
@@ -305,7 +325,7 @@ function renderYearView() {
     <div class="kpi-card" title="재직 용량 - 투입 (양수=여유, 음수=초과)"><div class="kpi-card__label">연간 여유 M/M</div><div class="kpi-card__value" style="color:${_availDispCol}">${_teamAvailFmt}</div></div>
   </div><div class="kpi-scope">${esc(_scopeTxt)}</div></div>`;
 
-  let html = `<table class="year-table"><thead>${sumRow}<tr>
+  let html = `<table class="year-table" aria-label="멤버별 월 투입 현황"><thead>${sumRow}<tr>
     <th class="col-member th-corner">멤버</th>`;
 
   for (const c of cols) {
@@ -324,7 +344,7 @@ function renderYearView() {
 
   visibleMembers.forEach(mem => {
     html += `<tr><td class="col-member">
-      <div class="member-cell" data-member="${mem.id}">
+      <div class="member-cell" data-member="${mem.id}" role="button" tabindex="0" aria-label="${esc(mem.name)} 상세 보기">
         <div class="member-avatar" style="background:${mem.color}">${esc(initials(mem.name))}</div>
         <div class="member-info">
           <div class="member-name">${esc(mem.name)}</div>
@@ -383,7 +403,7 @@ function renderYearView() {
         const _titleMM = state.assignMode==='both'
           ? `계획 ${_mp.toFixed(2)} / 실제 ${_ma.toFixed(2)} M/M`
           : `${(state.assignMode==='plan'?_mp:(_ma||_mp)).toFixed(2)} M/M`;
-        const _barAttrs = `data-project="${pj.id}" data-assign='${assignKey}' title="${esc(pj.name)} · ${_titleMM} · ${a.type} — 클릭하여 공수 수정" data-member="${mem.id}"`;
+        const _barAttrs = `data-project="${pj.id}" data-assign='${assignKey}' title="${esc(pj.name)} · ${_titleMM} · ${a.type} — 클릭하여 공수 수정" data-member="${mem.id}" role="button" tabindex="0" aria-label="${esc(pj.name)} ${cy}년 ${m}월 ${_titleMM} 수정 (Enter: 수정, Delete: 삭제)"`;
         const _biju = a.type==='비상주'?'biju':'';
 
         if (state.assignMode === 'both') {
@@ -788,28 +808,42 @@ function renderMemberPanel(memberId) {
   openBottomPanel('member');
 }
 
+let _panelOpener = null;
 function openBottomPanel(which) {
-  document.getElementById('projectPanel').classList.toggle('open', which==='project');
-  document.getElementById('memberPanel').classList.toggle('open',  which==='member');
+  if (!document.getElementById('overlay').classList.contains('show')) _panelOpener = document.activeElement;
+  const p = document.getElementById('projectPanel'), m = document.getElementById('memberPanel');
+  p.classList.toggle('open', which==='project'); p.inert = which !== 'project';
+  m.classList.toggle('open',  which==='member');  m.inert = which !== 'member';
   document.getElementById('overlay').classList.add('show');
+  (which === 'project' ? p : m).querySelector('.panel-close')?.focus({ preventScroll: true });
 }
 function closeBottomPanels() {
-  document.getElementById('projectPanel').classList.remove('open');
-  document.getElementById('memberPanel').classList.remove('open');
+  const wasOpen = document.getElementById('overlay').classList.contains('show');
+  for (const id of ['projectPanel', 'memberPanel']) { const el = document.getElementById(id); el.classList.remove('open'); el.inert = true; }
   document.getElementById('overlay').classList.remove('show');
+  if (wasOpen && _panelOpener && document.contains(_panelOpener)) _panelOpener.focus({ preventScroll: true });
+  _panelOpener = null;
 }
 
 // ═══════════════════════════════════════════════════════════
 // RENDER: MANAGEMENT DRAWER
 // ═══════════════════════════════════════════════════════════
+let _drawerOpener = null;
 function openDrawer() {
-  document.getElementById('mgmtDrawer').classList.add('open');
+  _drawerOpener = document.activeElement;
+  const dr = document.getElementById('mgmtDrawer'); dr.inert = false;
+  dr.classList.add('open');
+  dr.querySelector('.drawer-close')?.focus({ preventScroll: true });
   document.getElementById('drawerOverlay').style.opacity = '1';
   document.getElementById('drawerOverlay').style.pointerEvents = 'all';
   renderDrawerContent();
 }
 function closeDrawer() {
-  document.getElementById('mgmtDrawer').classList.remove('open');
+  const dr = document.getElementById('mgmtDrawer');
+  const wasOpen = dr.classList.contains('open');
+  dr.classList.remove('open'); dr.inert = true;
+  if (wasOpen && _drawerOpener && document.contains(_drawerOpener)) _drawerOpener.focus({ preventScroll: true });
+  _drawerOpener = null;
   document.getElementById('drawerOverlay').style.opacity = '0';
   document.getElementById('drawerOverlay').style.pointerEvents = 'none';
 }
@@ -1755,6 +1789,8 @@ function renderHeaderControls() {
   document.getElementById('btnYear').classList.toggle('active', state.viewMode==='year');
   document.getElementById('btnBench').classList.toggle('active', state.viewMode==='bench');
   document.getElementById('btnWisenm').classList.toggle('active', state.viewMode==='wisenm');
+  for (const [id, mode] of [['btnYear','year'],['btnBench','bench'],['btnWisenm','wisenm']]) document.getElementById(id).setAttribute('aria-pressed', String(state.viewMode === mode));
+  document.querySelectorAll('#assignModeSeg .amseg-btn').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.amode === state.assignMode)));
 
   const filterBar = document.getElementById('filterBar');
   const benchFilterBar = document.getElementById('benchFilterBar');
@@ -1964,6 +2000,7 @@ document.getElementById('showAllowanceCheck').addEventListener('change', functio
   try {
     if (localStorage.getItem('wfm_showTotalBar') === 'false') { tb.checked = false; document.getElementById('grid-container').classList.add('hide-total-bar'); }
     if (localStorage.getItem('wfm_showMonthBg') === 'true') { mb.checked = true; document.getElementById('grid-container').classList.add('show-month-bg'); }
+    if (localStorage.getItem('wfm_largeText') === 'true') { document.getElementById('largeText').checked = true; document.body.classList.add('large-text'); }
     if (localStorage.getItem('wfm_showPad') === 'false') { state.showPadMonths = false; document.getElementById('showPadMonths').checked = false; }
     // Restore assign mode
     const savedMode = localStorage.getItem('wfm_assignMode');
@@ -1981,6 +2018,15 @@ document.getElementById('showAllowanceCheck').addEventListener('change', functio
 document.getElementById('showTotalBar').addEventListener('change', function() {
   document.getElementById('grid-container').classList.toggle('hide-total-bar', !this.checked);
   try { localStorage.setItem('wfm_showTotalBar', this.checked); } catch(e){}
+});
+document.getElementById('largeText').addEventListener('change', function() {
+  document.body.classList.toggle('large-text', this.checked);
+  try { localStorage.setItem('wfm_largeText', this.checked); } catch(e){}
+});
+document.getElementById('btnToday').addEventListener('click', () => {
+  state.year = CUR_YEAR; state._center = true;
+  if (state.viewMode === 'bench') state.benchMonth = CUR_MONTH;
+  render();
 });
 document.getElementById('showPadMonths').addEventListener('change', function() {
   state.showPadMonths = this.checked;
