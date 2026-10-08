@@ -15,8 +15,8 @@
 - 최근 큰 작업: 24개월 표시 · 공통 Modal/ProjectPicker · 조회 실패 처리 · 재직 기반 용량 · 접근성/가독성 (아래 "작업 이력")
 
 ## ⚠️ 사용자 할 일
-- **구글 로그인 설정** (2026-10-09 코드·DB 완료, 설정 대기): Google Cloud Console 에서 OAuth 클라이언트(웹, 리디렉션 URI `https://juqlposwwqbkbpfndmnh.supabase.co/auth/v1/callback`, 원본 `https://pear205.github.io`·`http://localhost:7900`) → Supabase Auth > Providers > Google 에 ID/Secret 입력 → URL Configuration: Site URL `https://pear205.github.io/wfm/`, Redirect URLs 에 위 두 주소. "Allow new users to sign up" 은 **켜 둠**(구글 첫 로그인 시 계정 생성 필요, 데이터는 허용 목록이 막음).
-- **전환 완료 시**: 비밀번호 로그인 폼 제거 + `wfm_allowed_users` 에서 `pear205@gmail.com` 삭제 (Claude 에게 "전환 끝").
+- ~~구글 로그인 설정~~ → 2026-10-09 완료(Google Cloud 프로젝트 'My Project WFM 74949', OAuth 동의 화면 외부·**테스트 중**, Supabase Google provider·URL 설정). 첫 로그인 성공: `pear205@gmail.com` 구글 계정 — 기존 비밀번호 계정과 같은 사용자로 자동 연결됨. 팀원 추가 시 **Google Cloud 테스트 사용자 + `wfm_allowed_users`** 두 곳에 이메일 추가(게시하면 테스트 사용자 불필요, 게시엔 브랜딩·개인정보처리방침·도메인 인증 필요).
+- **전환 완료 시**: 비밀번호 로그인 폼 제거 (Claude 에게 "전환 끝"). `pear205@gmail.com` 은 구글 로그인 계정이라 허용 목록에 **유지**.
 - ~~`sql/boards.sql` 실행~~ → 2026-10-08 Supabase 커넥터로 common 프로젝트에 적용 완료(템플릿 4·게시판 3 시드 확인).
 - ~~`wfm_allowances` RLS 꺼짐~~ → 2026-10-08 RLS + authenticated 전체 권한 정책 적용 완료. 남은 Supabase 보안 권고: Auth 의 유출 비밀번호 차단(Leaked Password Protection) 꺼짐 — 대시보드 Auth 설정에서 켜기 권장.
 - Supabase 대시보드 Auth 에서 **"Allow new users to sign up" 이 꺼져 있는지 확인** (정책이 로그인한 모든 사용자에게 허용이라, 가입이 열려 있으면 누구나 데이터에 접근 가능).

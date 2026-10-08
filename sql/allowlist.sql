@@ -2,7 +2,7 @@
 -- WFM 접근 허용 목록 (2026-10-09 common 프로젝트에 적용 완료 — 기록용)
 -- 로그인(비밀번호·구글)만으로는 데이터에 접근할 수 없고, wfm_allowed_users 에 등록된 이메일만 허용.
 -- 팀원 추가: insert into public.wfm_allowed_users (email, note) values ('someone@gsneotek.com', '메모');
--- 전환 완료 후: delete from public.wfm_allowed_users where email = 'pear205@gmail.com';
+-- pear205@gmail.com 은 구글 로그인 계정(2026-10-09 확인)이라 유지.
 -- ═══════════════════════════════════════════════════════════
 
 create table if not exists public.wfm_allowed_users (
