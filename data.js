@@ -172,7 +172,9 @@ const SaveState = {
   },
   _emit() { this._listeners.forEach(fn => { try { fn(this); } catch (e) { console.error(e); } }); },
   // 작업 하나를 실행하고 결과를 기록한다. 절대 reject 하지 않는다(true=성공)
-  async _run(label, thunk) {
+  async _run(label, thunk, key) {
+    // 같은 key 의 새 쓰기는 이전에 실패한 쓰기를 대체한다. 'reset' 은 실패한 모든 쓰기를 대체
+    if (key) this.failed = this.failed.filter(f => key === 'reset' ? false : f.key !== key);
     this.pending++;
     const p = (async () => {
       let err = null;
@@ -188,7 +190,7 @@ const SaveState = {
     if (!err && this.pending === 0 && this.failed.length === 0) this._toasted = false;
     if (err) {
       console.error('저장 실패 [' + label + ']', err);
-      this.failed.push({ label, thunk, message: (err && err.message) || String(err) });
+      this.failed.push({ label, thunk, key, message: (err && err.message) || String(err) });
       if (!this._toasted) { this._toasted = true; showToast('저장에 실패했습니다 — 상단에서 다시 시도할 수 있습니다'); }
     }
     this._set();
@@ -198,7 +200,7 @@ const SaveState = {
   async retry() {
     const list = this.failed; this.failed = [];
     this._set();
-    for (const f of list) await this._run(f.label, f.thunk);
+    for (const f of list) await this._run(f.label, f.thunk, f.key);
   },
   // 저장되지 않은 로컬 변경을 버리고 서버 상태를 다시 불러온다. 호출한 쪽이 render() 한다
   async revert() {
@@ -209,7 +211,10 @@ const SaveState = {
   },
   isDirty() { return this.pending > 0 || this.failed.length > 0; },
 };
-function _track(label, thunk) { return SaveState._run(label, thunk); }
+// key: 쓰는 행 식별자. 업서트 thunk 는 재시도 시점의 DATA 를 다시 읽어 낡은 값으로 덮어쓰지 않는다
+function _track(label, key, thunk) { return SaveState._run(label, thunk, key); }
+const _upsertMember  = id => { const m = DATA.members.find(x => x.id === id);  return m ? _sb.from('wfm_members').upsert(_memberToRow(m)) : {}; };
+const _upsertProject = id => { const p = DATA.projects.find(x => x.id === id); return p ? _sb.from('wfm_projects').upsert(_projectToRow(p)) : {}; };
 
 window.addEventListener('beforeunload', e => {
   if (!SaveState.isDirty()) return;
@@ -258,61 +263,57 @@ const DataAPI = {
   addMember(m) {
     m.id = 'm' + Date.now();
     DATA.members.push(m);
-    _track('멤버 추가', () => _sb.from('wfm_members').upsert(_memberToRow(m)));
+    _track('멤버 추가', 'member:' + m.id, () => _upsertMember(m.id));
     return m;
   },
   updateMember(id, u) {
     const i = DATA.members.findIndex(m => m.id === id);
     if (i >= 0) {
       DATA.members[i] = { ...DATA.members[i], ...u };
-      const row = _memberToRow(DATA.members[i]);
-      _track('멤버 수정', () => _sb.from('wfm_members').upsert(row));
+      _track('멤버 수정', 'member:' + id, () => _upsertMember(id));
     }
   },
   reorderMembers(ids) {
     const map = new Map(DATA.members.map(m => [m.id, m]));
     DATA.members = ids.map(id => map.get(id)).filter(Boolean);
     DATA.members.forEach((m, i) => { m.sort_order = i; });
-    const updates = DATA.members.map(m => _memberToRow(m));
-    _track('멤버 순서', () => _sb.from('wfm_members').upsert(updates));
+    _track('멤버 순서', 'reorder:members', () => DATA.members.length ? _sb.from('wfm_members').upsert(DATA.members.map(_memberToRow)) : {});
   },
   deleteMember(id) {
     DATA.members     = DATA.members.filter(m => m.id !== id);
     DATA.assignments = DATA.assignments.filter(a => a.memberId !== id);
     DATA.allowances  = DATA.allowances.filter(a => a.memberId !== id);
-    _track('멤버 삭제', () => _sb.from('wfm_members').delete().eq('id', id));
-    _track('멤버 투입 삭제', () => _sb.from('wfm_assignments').delete().eq('member_id', id));
-    _track('멤버 현장수당 삭제', () => _sb.from('wfm_allowances').delete().eq('member_id', id));
+    _track('멤버 삭제', 'member:' + id, () => _sb.from('wfm_members').delete().eq('id', id));
+    _track('멤버 투입 삭제', 'member-asg:' + id, () => _sb.from('wfm_assignments').delete().eq('member_id', id));
+    _track('멤버 현장수당 삭제', 'member-allow:' + id, () => _sb.from('wfm_allowances').delete().eq('member_id', id));
   },
 
   reorderProjects(ids) {
     const map = new Map(DATA.projects.map(p => [p.id, p]));
     DATA.projects = ids.map(id => map.get(id)).filter(Boolean);
     DATA.projects.forEach((p, i) => { p.sort_order = i; });
-    const updates = DATA.projects.map(p => _projectToRow(p));
-    _track('프로젝트 순서', () => _sb.from('wfm_projects').upsert(updates));
+    _track('프로젝트 순서', 'reorder:projects', () => DATA.projects.length ? _sb.from('wfm_projects').upsert(DATA.projects.map(_projectToRow)) : {});
   },
 
   /* ── 프로젝트 ── */
   addProject(p) {
     p.id = 'p' + Date.now();
     DATA.projects.push(p);
-    _track('프로젝트 추가', () => _sb.from('wfm_projects').upsert(_projectToRow(p)));
+    _track('프로젝트 추가', 'project:' + p.id, () => _upsertProject(p.id));
     return p;
   },
   updateProject(id, u) {
     const i = DATA.projects.findIndex(p => p.id === id);
     if (i >= 0) {
       DATA.projects[i] = { ...DATA.projects[i], ...u };
-      const row = _projectToRow(DATA.projects[i]);
-      _track('프로젝트 수정', () => _sb.from('wfm_projects').upsert(row));
+      _track('프로젝트 수정', 'project:' + id, () => _upsertProject(id));
     }
   },
   deleteProject(id) {
     DATA.projects    = DATA.projects.filter(p => p.id !== id);
     DATA.assignments = DATA.assignments.filter(a => a.projectId !== id);
-    _track('프로젝트 삭제', () => _sb.from('wfm_projects').delete().eq('id', id));
-    _track('프로젝트 투입 삭제', () => _sb.from('wfm_assignments').delete().eq('project_id', id));
+    _track('프로젝트 삭제', 'project:' + id, () => _sb.from('wfm_projects').delete().eq('id', id));
+    _track('프로젝트 투입 삭제', 'project-asg:' + id, () => _sb.from('wfm_assignments').delete().eq('project_id', id));
   },
 
   /* ── 공수 ── */
@@ -323,14 +324,17 @@ const DataAPI = {
     );
     if (i >= 0) { DATA.assignments[i] = entry; }
     else        { DATA.assignments.push(entry); }
-    const row = { member_id:memberId, project_id:projectId, year, month, mm: mm_plan, mm_plan, mm_actual: mm_actual||0, type };
-    _track('공수 저장', () => _sb.from('wfm_assignments').upsert(row));
+    const asgKey = 'asg:' + [memberId, projectId, year, month].join(':');
+    _track('공수 저장', asgKey, () => {
+      const a = DATA.assignments.find(x => x.memberId===memberId && x.projectId===projectId && x.year===year && x.month===month);
+      return a ? _sb.from('wfm_assignments').upsert(_assignmentToRow(a)) : {};
+    });
   },
   deleteAssignment(memberId, projectId, year, month) {
     DATA.assignments = DATA.assignments.filter(a =>
       !(a.memberId===memberId && a.projectId===projectId && a.year===year && a.month===month)
     );
-    _track('공수 삭제', () => _sb.from('wfm_assignments').delete()
+    _track('공수 삭제', 'asg:' + [memberId, projectId, year, month].join(':'), () => _sb.from('wfm_assignments').delete()
       .eq('member_id', memberId).eq('project_id', projectId)
       .eq('year', year).eq('month', month));
   },
@@ -340,12 +344,13 @@ const DataAPI = {
     const i = DATA.allowances.findIndex(a => a.memberId===memberId && a.year===year && a.month===month);
     if (i >= 0) {
       DATA.allowances.splice(i, 1);
-      _track('현장수당 해제', () => _sb.from('wfm_allowances').delete()
+      _track('현장수당 해제', 'allow:' + [memberId, year, month].join(':'), () => _sb.from('wfm_allowances').delete()
         .eq('member_id', memberId).eq('year', year).eq('month', month));
     } else {
       DATA.allowances.push({memberId, year, month});
       // 기본키 구성을 가정하지 않고 멱등하게: 같은 행을 지운 뒤 넣는다(재시도해도 중복되지 않음)
-      _track('현장수당 지정', async () => {
+      _track('현장수당 지정', 'allow:' + [memberId, year, month].join(':'), async () => {
+        if (!DataAPI.hasAllowance(memberId, year, month)) return {};  // 재시도 시점에 이미 해제됐으면 건너뜀
         const del = await _sb.from('wfm_allowances').delete()
           .eq('member_id', memberId).eq('year', year).eq('month', month);
         if (del.error) return del;
@@ -361,11 +366,9 @@ const DataAPI = {
   async reset() {
     _resetToDefaults();
     DATA.allowances = [];
-    const members = DATA.members.map(_memberToRow), projects = DATA.projects.map(_projectToRow),
-          assignments = DATA.assignments.map(_assignmentToRow);
     // 전체 삭제 → 재삽입을 한 작업으로 묶는다. 어느 단계든 오류면 실패로 기록, 다시 실행해도 같은 결과(upsert)
     const firstError = rs => (rs.find(r => r && r.error) || {}).error;
-    await _track('데이터 초기화', async () => {
+    await _track('데이터 초기화', 'reset', async () => {
       let err = firstError(await Promise.all([
         _sb.from('wfm_assignments').delete().neq('member_id', ''),
         _sb.from('wfm_projects').delete().neq('id', ''),
@@ -373,10 +376,13 @@ const DataAPI = {
         _sb.from('wfm_allowances').delete().neq('member_id', ''),
       ]));
       if (err) return { error: err };
+      // 재시도 시점의 DATA 를 다시 읽는다(초기화 이후 편집분 보존)
+      const ins = (t, rows) => rows.length ? _sb.from(t).upsert(rows) : {};
       err = firstError(await Promise.all([
-        _sb.from('wfm_members').upsert(members),
-        _sb.from('wfm_projects').upsert(projects),
-        _sb.from('wfm_assignments').upsert(assignments),
+        ins('wfm_members', DATA.members.map(_memberToRow)),
+        ins('wfm_projects', DATA.projects.map(_projectToRow)),
+        ins('wfm_assignments', DATA.assignments.map(_assignmentToRow)),
+        DATA.allowances.length ? _sb.from('wfm_allowances').insert(DATA.allowances.map(a => ({member_id: a.memberId, year: a.year, month: a.month}))) : {},
       ]));
       return err ? { error: err } : {};
     });
