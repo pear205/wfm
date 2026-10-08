@@ -16,7 +16,7 @@
 
 ## ⚠️ 사용자 할 일
 - ~~구글 로그인 설정~~ → 2026-10-09 완료(Google Cloud 프로젝트 'My Project WFM 74949', OAuth 동의 화면 외부·**테스트 중**, Supabase Google provider·URL 설정). 첫 로그인 성공: `pear205@gmail.com` 구글 계정 — 기존 비밀번호 계정과 같은 사용자로 자동 연결됨. 팀원 추가 시 **Google Cloud 테스트 사용자 + `wfm_allowed_users`** 두 곳에 이메일 추가(게시하면 테스트 사용자 불필요, 게시엔 브랜딩·개인정보처리방침·도메인 인증 필요).
-- **Supabase Auth 에서 Email provider 비활성화**: 코드에선 비밀번호 로그인을 제거했지만, 대시보드에서 끄지 않으면 API 로 비밀번호 로그인이 여전히 가능합니다(Authentication > Sign In / Providers > Email 끄기). 구글 로그인 계정(`pear205@gmail.com`)은 허용 목록에 유지.
+- ~~**Supabase Auth 에서 Email provider 비활성화**: 코드에선 비밀번호 로그인을 제거했지만, 대시보드에서 끄지 않으면 API 로 비밀번호 로그인이 여전히 가능합니다(Authentication > Sign In / Providers > Email 끄기). 구글 로그인 계정(`pear205@gmail.com`)은 허용 목록에 유지.~~ → 2026-10-09 완료(서버 확인: 비밀번호 로그인 요청이 `email_provider_disabled` 로 거부됨).
 - ~~`sql/boards.sql` 실행~~ → 2026-10-08 Supabase 커넥터로 common 프로젝트에 적용 완료(템플릿 4·게시판 3 시드 확인).
 - ~~`wfm_allowances` RLS 꺼짐~~ → 2026-10-08 RLS + authenticated 전체 권한 정책 적용 완료. 남은 Supabase 보안 권고: Auth 의 유출 비밀번호 차단(Leaked Password Protection) 꺼짐 — 대시보드 Auth 설정에서 켜기 권장.
 - Supabase 대시보드 Auth 에서 **"Allow new users to sign up" 이 꺼져 있는지 확인** (정책이 로그인한 모든 사용자에게 허용이라, 가입이 열려 있으면 누구나 데이터에 접근 가능).
