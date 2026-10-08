@@ -15,6 +15,8 @@
 - 최근 큰 작업: 24개월 표시 · 공통 Modal/ProjectPicker · 조회 실패 처리 · 재직 기반 용량 · 접근성/가독성 (아래 "작업 이력")
 
 ## ⚠️ 사용자 할 일
+- **구글 로그인 설정** (2026-10-09 코드·DB 완료, 설정 대기): Google Cloud Console 에서 OAuth 클라이언트(웹, 리디렉션 URI `https://juqlposwwqbkbpfndmnh.supabase.co/auth/v1/callback`, 원본 `https://pear205.github.io`·`http://localhost:7900`) → Supabase Auth > Providers > Google 에 ID/Secret 입력 → URL Configuration: Site URL `https://pear205.github.io/wfm/`, Redirect URLs 에 위 두 주소. "Allow new users to sign up" 은 **켜 둠**(구글 첫 로그인 시 계정 생성 필요, 데이터는 허용 목록이 막음).
+- **전환 완료 시**: 비밀번호 로그인 폼 제거 + `wfm_allowed_users` 에서 `pear205@gmail.com` 삭제 (Claude 에게 "전환 끝").
 - ~~`sql/boards.sql` 실행~~ → 2026-10-08 Supabase 커넥터로 common 프로젝트에 적용 완료(템플릿 4·게시판 3 시드 확인).
 - ~~`wfm_allowances` RLS 꺼짐~~ → 2026-10-08 RLS + authenticated 전체 권한 정책 적용 완료. 남은 Supabase 보안 권고: Auth 의 유출 비밀번호 차단(Leaked Password Protection) 꺼짐 — 대시보드 Auth 설정에서 켜기 권장.
 - Supabase 대시보드 Auth 에서 **"Allow new users to sign up" 이 꺼져 있는지 확인** (정책이 로그인한 모든 사용자에게 허용이라, 가입이 열려 있으면 누구나 데이터에 접근 가능).
@@ -45,6 +47,7 @@
 - 저장 추적 한계: 실패 건은 새로고침하면 사라짐(메모리 보관, 떠날 때 beforeunload 경고만). 멤버/프로젝트 순서 변경은 개별 행과 다른 키라 둘 다 재시도될 수 있음(재시도는 현재 DATA 를 다시 읽으므로 값은 최신).
 
 ## 합의된 결정 (되돌리지 말 것)
+- **로그인: 구글(OAuth)만 사용**, 전환 기간에는 이메일·비밀번호 로그인 병행. **허용 목록** `wfm_allowed_users`(이메일) 에 있는 계정만 모든 wfm_* 테이블 접근(RLS `wfm_is_allowed()`, `sql/allowlist.sql`). 팀원 추가는 이 테이블에 이메일 insert. 허용 안 된 계정은 로그인 후 "허용되지 않은 계정" 안내.
 - 조회 실패: **오류 화면 + 재시도**, 샘플 데이터 자동 대체·빈 DB 자동 업로드 **제거**. 샘플(시드) 데이터와 "데이터 초기화" 버튼도 2026-10-09 코드에서 **완전 제거**(DB 이전 시절 하드코딩이라 불필요).
 - 표 범위: **24개월 유지 + "앞뒤 기간 보기" 토글**(기본 켬, localStorage `wfm_showPad`). KPI·연간 가용은 기준 연도 12개월만 집계.
 - 프로젝트 선택: 기본 **완료 제외 + 기간 내만** (체크박스로 변경, `wfm_ppOpts` 저장). 선택된 프로젝트는 항상 목록에 남김.
@@ -91,6 +94,7 @@
 | 7 반응형·접근성 | △ 접근성 대부분 완료 / 모바일 미착수 |
 
 ## 작업 이력 (최근 → 과거, 2026-10-07 세션 위주)
+- (2026-10-09) 구글 로그인 버튼(PKCE)·복귀 처리·허용 목록 확인·로그아웃 버튼, DB 허용 목록 + 전체 테이블 RLS 교체(시뮬레이션: 허용 계정 정상, 비허용 0건).
 - (2026-10-09) **하드코딩 정리**: `data.js` 의 샘플 시드(`DEFAULT_*`, `_mkA`, `_resetToDefaults`)·`DataAPI.reset`·"데이터 초기화" 버튼 제거, 로그인 이메일 입력창 추가(`wfm_lastEmail` 기억, 소스에서 이메일 문자열 제거), `wisenm.js` 노트의 업체/고객사 이름 중립화.
 - (2026-10-08) **게시판 기능**: 메뉴 "게시판", 자유게시판·유지보수 지원 이력(M/D 합계: 월/프로젝트/멤버별)·면담 이력(양식 2종), 검색, 댓글, 30개씩 더 보기, CSV 내보내기, 관리 드로어 게시판/템플릿 탭(필드 편집기). 하위 모델 3개 병렬 구현 → 브라우저 검증 → Opus 리뷰 2회(데이터 보존·FK·서버 확인·로딩 고착 등 수정). 게시판/WiseNTM 화면에서는 연도 이동 숨김.
 - (2026-10-08) 프로젝트 선택창: 공간이 좁을 때 검색창·옵션 줄이 눌려 잘리던 문제 수정(`flex-shrink:0`). 참고: 실제 DB 의 "프로젝트 N / 고객N" 항목은 코드에 없는 데이터(테스트 입력 추정) — 사용자가 확인 후 정리 예정.

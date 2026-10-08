@@ -241,24 +241,113 @@ const state = {
   showAllowance: false,
 };
 
-// ─── Auth (Supabase Auth) ───
+// ─── Auth (Supabase Auth: Google OAuth + 이메일/비밀번호) ───
+function _authUrlHasParams() {
+  return /[?&#](code|access_token|error_description)=/.test(location.search + location.hash);
+}
+function _cleanAuthUrl() {
+  if (!_authUrlHasParams()) return;
+  const u = new URL(location.href);
+  ['code', 'error', 'error_code', 'error_description'].forEach(k => u.searchParams.delete(k));
+  history.replaceState(null, '', u.pathname + u.search);
+}
+// 로그인된 계정이 허용 목록(wfm_allowed_users)에 있는지. 조회 오류면 막지 않는다.
+async function _isAllowedUser() {
+  try {
+    const { data, error } = await _sb.from('wfm_allowed_users').select('email').limit(1);
+    if (error) { console.warn('[auth] allowlist check failed', error); return true; }
+    return !!(data && data.length);
+  } catch (e) {
+    console.warn('[auth] allowlist check failed', e);
+    return true;
+  }
+}
+async function _waitForSignIn(ms) {
+  return new Promise(resolve => {
+    const { data: { subscription } } = _sb.auth.onAuthStateChange((ev, s) => {
+      if (ev === 'SIGNED_IN' && s) { subscription.unsubscribe(); clearTimeout(t); resolve(s); }
+    });
+    const t = setTimeout(() => { subscription.unsubscribe(); resolve(null); }, ms);
+  });
+}
 async function _checkAuth() {
-  const overlay = document.getElementById('authOverlay');
-  const { data: { session } } = await _sb.auth.getSession();
-  if (session) {
+  const overlay  = document.getElementById('authOverlay');
+  const mainEl   = document.getElementById('authMain');
+  const deniedEl = document.getElementById('authDenied');
+  const deniedMsg = document.getElementById('authDeniedMsg');
+  const subtitle = document.getElementById('authSubtitle');
+  const emailEl  = document.getElementById('authEmail');
+  const input    = document.getElementById('authInput');
+  const btn      = document.getElementById('authBtn');
+  const gBtn     = document.getElementById('authGoogle');
+  const err      = document.getElementById('authError');
+  const logout   = document.getElementById('btnLogout');
+
+  function showForm() {
+    mainEl.hidden = false; deniedEl.hidden = true;
+    subtitle.hidden = false;
+    btn.disabled = false; gBtn.disabled = false; input.value = '';
+    overlay.classList.remove('hidden');
+  }
+  function showDenied(email) {
+    mainEl.hidden = true; deniedEl.hidden = false; subtitle.hidden = true;
+    deniedMsg.textContent = '허용되지 않은 계정입니다 (' + email + '). 관리자에게 등록을 요청하세요.';
+    overlay.classList.remove('hidden');
+    document.getElementById('authSwitch').focus();
+  }
+
+  logout.onclick = async () => {
+    try { await _sb.auth.signOut(); } catch (e) { console.warn('[auth] signOut failed', e); }
+    location.reload();
+  };
+  document.getElementById('authSwitch').onclick = async () => {
+    try { await _sb.auth.signOut(); } catch (e) { console.warn('[auth] signOut failed', e); }
+    err.textContent = '';
+    showForm();
+    emailEl.focus();
+  };
+  gBtn.onclick = async () => {
+    err.textContent = '';
+    gBtn.disabled = true;
+    try {
+      const { error } = await _sb.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: location.origin + location.pathname },
+      });
+      if (error) throw error;
+    } catch (e) {
+      err.textContent = 'Google 로그인을 시작하지 못했습니다. ' + (e && e.message ? e.message : '');
+      gBtn.disabled = false;
+    }
+  };
+
+  // 세션 확보 (OAuth 복귀 시 URL 의 code/access_token 처리 완료까지 대기)
+  let { data: { session } } = await _sb.auth.getSession();
+  if (!session && _authUrlHasParams()) {
+    session = await _waitForSignIn(4000);
+    if (!session) ({ data: { session } } = await _sb.auth.getSession());
+  }
+  const urlError = new URLSearchParams(location.search).get('error_description');
+  _cleanAuthUrl();
+
+  if (session && await _isAllowedUser()) {
     overlay.classList.add('hidden');
+    logout.hidden = false;
+    logout.title = session.user?.email || '';
     return;
   }
+
   return new Promise(resolve => {
-    const emailEl = document.getElementById('authEmail');
-    const input = document.getElementById('authInput');
-    const btn   = document.getElementById('authBtn');
-    const err   = document.getElementById('authError');
     let last = '';
     try { last = localStorage.getItem('wfm_lastEmail') || ''; } catch (e) {}
     emailEl.value = last;
-    overlay.classList.remove('hidden');
-    (last ? input : emailEl).focus();
+    if (session) {
+      showDenied(session.user?.email || '');
+    } else {
+      showForm();
+      if (urlError) err.textContent = '로그인 실패: ' + urlError;
+      (last ? input : emailEl).focus();
+    }
     async function attempt() {
       const email = emailEl.value.trim();
       if (!email) {
@@ -268,7 +357,7 @@ async function _checkAuth() {
       }
       btn.disabled = true;
       err.textContent = '';
-      const { error } = await _sb.auth.signInWithPassword({
+      const { data, error } = await _sb.auth.signInWithPassword({
         email,
         password: input.value,
       });
@@ -277,11 +366,17 @@ async function _checkAuth() {
         input.value = '';
         input.focus();
         btn.disabled = false;
-      } else {
-        try { localStorage.setItem('wfm_lastEmail', email); } catch (e) {}
-        overlay.classList.add('hidden');
-        resolve();
+        return;
       }
+      try { localStorage.setItem('wfm_lastEmail', email); } catch (e) {}
+      if (!(await _isAllowedUser())) {
+        showDenied(data?.user?.email || email);
+        return;
+      }
+      overlay.classList.add('hidden');
+      logout.hidden = false;
+      logout.title = data?.user?.email || email;
+      resolve();
     }
     btn.onclick = attempt;
     [emailEl, input].forEach(el => el.addEventListener('keydown', e => { if (e.key === 'Enter') attempt(); }));

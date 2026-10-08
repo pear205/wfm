@@ -526,6 +526,24 @@ button{cursor:pointer;border:none;background:none;font-family:inherit}
   transition:filter .15s;
 }
 .auth-btn:hover{filter:brightness(1.12)}
+.auth-main{width:100%;display:flex;flex-direction:column;align-items:center}
+.auth-main[hidden],.auth-denied[hidden]{display:none}
+.auth-google{
+  width:100%;height:42px;display:flex;align-items:center;justify-content:center;gap:10px;
+  background:#fff;color:#3c4043;border:1px solid #dadce0;border-radius:8px;
+  font-size:14px;font-weight:600;font-family:'Noto Sans KR',sans-serif;
+  transition:background .15s,box-shadow .15s;
+}
+.auth-google:hover{background:#f8f9fa;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+.auth-google:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.auth-google:disabled{opacity:.6;cursor:default}
+.auth-divider{
+  width:100%;display:flex;align-items:center;gap:10px;margin:16px 0;
+  font-size:11px;color:var(--text-hd-m);
+}
+.auth-divider::before,.auth-divider::after{content:"";flex:1;height:1px;background:var(--border-hd)}
+.auth-denied{width:100%;display:flex;flex-direction:column;align-items:center}
+.auth-denied-msg{font-size:13px;line-height:1.5;color:#F87171;text-align:center;margin-bottom:16px;word-break:break-all}
 
 /* ═══════════════════════════════════════════════════════════
  * WISENM VIEW — WiseNTM 공수 산정표
