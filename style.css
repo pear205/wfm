@@ -512,6 +512,7 @@ button{cursor:pointer;border:none;background:none;font-family:inherit}
   outline:none;transition:border-color .2s;
   font-family:'JetBrains Mono',monospace;
 }
+.auth-email{letter-spacing:normal;margin-bottom:8px}
 .auth-input:focus{border-color:var(--accent)}
 .auth-input::placeholder{letter-spacing:.05em;color:var(--text-hd-m)}
 .auth-error{

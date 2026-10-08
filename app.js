@@ -250,30 +250,41 @@ async function _checkAuth() {
     return;
   }
   return new Promise(resolve => {
+    const emailEl = document.getElementById('authEmail');
     const input = document.getElementById('authInput');
     const btn   = document.getElementById('authBtn');
     const err   = document.getElementById('authError');
+    let last = '';
+    try { last = localStorage.getItem('wfm_lastEmail') || ''; } catch (e) {}
+    emailEl.value = last;
     overlay.classList.remove('hidden');
-    input.focus();
+    (last ? input : emailEl).focus();
     async function attempt() {
+      const email = emailEl.value.trim();
+      if (!email) {
+        err.textContent = '이메일을 입력하세요.';
+        emailEl.focus();
+        return;
+      }
       btn.disabled = true;
       err.textContent = '';
       const { error } = await _sb.auth.signInWithPassword({
-        email: 'pear205@gmail.com',
+        email,
         password: input.value,
       });
       if (error) {
-        err.textContent = '비밀번호가 올바르지 않습니다.';
+        err.textContent = '이메일 또는 비밀번호가 올바르지 않습니다.';
         input.value = '';
         input.focus();
         btn.disabled = false;
       } else {
+        try { localStorage.setItem('wfm_lastEmail', email); } catch (e) {}
         overlay.classList.add('hidden');
         resolve();
       }
     }
     btn.onclick = attempt;
-    input.addEventListener('keydown', e => { if (e.key === 'Enter') attempt(); });
+    [emailEl, input].forEach(el => el.addEventListener('keydown', e => { if (e.key === 'Enter') attempt(); }));
   });
 }
 
@@ -2433,14 +2444,6 @@ document.getElementById('drawerBody').addEventListener('click', e => {
     }, { label: '삭제', color: '#fff' });
   }
 });
-
-document.getElementById('btnReset').onclick = async () => {
-  if (!confirm('샘플 데이터로 초기화하시겠습니까? 현재 변경 내용이 모두 삭제됩니다.')) return;
-  await DataAPI.reset();
-  _initProjFilter();
-  closeDrawer();
-  render();
-};
 
 // Form modal
 document.getElementById('formSaveBtn').onclick = () => {

@@ -12,7 +12,8 @@
   <div class="auth-card">
     <div class="auth-brand">WFM</div>
     <div class="auth-title">투입 이력 현황</div>
-    <div class="auth-subtitle">비밀번호를 입력하세요</div>
+    <div class="auth-subtitle">이메일과 비밀번호를 입력하세요</div>
+    <input type="email" id="authEmail" class="auth-input auth-email" placeholder="이메일" autocomplete="username">
     <input type="password" id="authInput" class="auth-input" placeholder="••••••••" autocomplete="current-password">
     <div class="auth-error" id="authError"></div>
     <button class="auth-btn" id="authBtn">입장</button>
@@ -142,7 +143,6 @@
   </div>
   <div class="drawer-body" id="drawerBody"></div>
   <div class="drawer-footer">
-    <button class="btn-ghost-xs" id="btnReset">데이터 초기화</button>
     <span style="font-size:11px;color:var(--text-m)">변경 내용은 서버에 자동 저장됩니다</span>
   </div>
 </div>

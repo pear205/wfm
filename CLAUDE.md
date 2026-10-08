@@ -22,11 +22,11 @@ wfm/
 
 ## 로컬 실행 / 배포
 - 정적 서버로 포트 7900에 띄움: `python -m http.server 7900` 또는 `.claude/launch.json` 의 `npx serve -p 7900 -s .`
-- 로그인(Supabase Auth)이 필요하며 **비밀번호는 문서·코드·채팅에 남기지 말 것**. 에이전트는 비밀번호를 입력하지 않으므로, 로컬 검증은 `DATA`/`LOAD` 를 직접 채우고 `render()` 를 호출하는 방식으로 한다.
+- 로그인(Supabase Auth, 이메일+비밀번호 입력)이 필요하며 **비밀번호는 문서·코드·채팅에 남기지 말 것**. 에이전트는 비밀번호를 입력하지 않으므로, 로컬 검증은 `DATA`/`LOAD` 를 직접 채우고 `render()` 를 호출하는 방식으로 한다.
 - 배포: `master` 푸시 → GitHub Pages(https://pear205.github.io/wfm/) 에 1~2분 뒤 반영. 확인 시 Ctrl+F5(캐시).
 
 ## 핵심 기술 사항
-- `DATA` 객체 (`data.js`): `members`, `projects`, `assignments` 배열, Supabase 영속화 (조회 실패 시 오류 화면+재시도, 샘플 데이터 자동 대체 없음)
+- `DATA` 객체 (`data.js`): `members`, `projects`, `assignments` 배열, Supabase 영속화 (조회 실패 시 오류 화면+재시도. 샘플/시드 데이터는 코드에 없음 — 모든 데이터는 DB 에서만 옴)
 - `state` 객체 (`app.js`): 현재 뷰·필터·모달 상태 관리
 - `DataAPI` (`data.js`): CRUD 메서드 (addMember, updateMember, setAssignment 등)
 - `render()` → `switchView()` → `renderYearView()` / `renderBenchView()`
@@ -90,10 +90,6 @@ MgmtView  ── 관리 화면 (멤버·프로젝트 CRUD)
 
 > **신규 화면 추가 시:** 위 블록을 조합하고, 화면 전용 요소만 새 접두어(예: `.report-*`)로 추가.
 
-## ⚠️ 절대 수정 금지
-**`data.js`의 m1~m8 멤버 identity 필드 (name, role, color, skills)는 절대 변경하지 말 것.**
-실제 팀원 정보입니다. `start`/`end` 날짜 필드 추가는 허용.
-
 ## 구현 완료 항목
 - [x] 연도별 그리드 뷰 (공수 입력·수정·삭제)
 - [x] 가용인력 뷰 (월별 여유공수, 색상 인디케이터)
@@ -111,6 +107,7 @@ MgmtView  ── 관리 화면 (멤버·프로젝트 CRUD)
 - [x] 멤버 투입 팝업: 연·월 키 12개월 창(◀▶, 헤더 끌기 이동), 월 단위 diff 저장, 달별 유형 보존
 - [x] 공통 `Modal`, `ProjectPicker`, 표 끌어서 스크롤(관성), 저장 실패 토스트
 - [x] 조회 실패 오류 화면+재시도 (샘플 자동 대체·자동 업로드 제거)
+- [x] 하드코딩 제거: 샘플 시드 데이터·"데이터 초기화" 버튼·로그인 이메일(입력창, 마지막 이메일은 localStorage `wfm_lastEmail`)
 - [x] 재직 기반 공통 용량, 필터 일관 적용, KPI/부호/라벨 정리, 입력 검증
 - [x] 접근성: 포커스 트랩, 패널/드로어 inert, 막대 키보드 조작(roving tabindex), aria, 큰 글씨, 대비 개선
 - [x] 관리 드로어: 프로젝트·멤버 추가 버튼을 목록 맨 위(스크롤 시 고정)

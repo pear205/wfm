@@ -24,8 +24,8 @@ function _wnScaleDesc(r) {
 }
 
 const WISENM_VARS = [
-  { id:'db',    name:'DB 설치 및 이중화', unit:'M/M', placeholder:'별도 산정', note:'HA 구성 규모에 따라 상이 (고객 제공시 제외) 외부업체 "스태커"' },
-  { id:'branch',name:'지점 설치',        unit:'MD/지점', placeholder:'0.5', scale:'일정 협의 기간 + (지점 × n M/D)', note:'현장 설치·테스트·교육 (신한라이프의경우 굉장히 많은 공수가 들어감 미리 협의 필요)' },
+  { id:'db',    name:'DB 설치 및 이중화', unit:'M/M', placeholder:'별도 산정', note:'HA 구성 규모에 따라 상이 (고객 제공시 제외) 외부업체' },
+  { id:'branch',name:'지점 설치',        unit:'MD/지점', placeholder:'0.5', scale:'일정 협의 기간 + (지점 × n M/D)', note:'현장 설치·테스트·교육 (고객사에 따라 공수 편차가 커 사전 협의 필요)' },
   { id:'maint', name:'유지보수',         unit:'MM/월', placeholder:'0.5', note:'운영 안정화 후 적용 (인력 배정을 위해 M/M단위 필요)' },
   { id:'si',    name:'SI 커스터마이징',   unit:'M/M', placeholder:'별도 산정', note:'고객사 개발 요건에 따라 상이' },
 ];
