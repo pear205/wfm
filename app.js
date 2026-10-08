@@ -2822,6 +2822,24 @@ function mountProjectPicker(host, { id, value, getRange, getMemberId, needsPerio
   window.addEventListener('pointercancel', end);
 })();
 
+// ─── 저장 상태 표시 (AppBar) ───
+(function() {
+  const box = document.getElementById('saveStatus'), msg = document.getElementById('saveMsg');
+  const retry = document.getElementById('btnSaveRetry'), revert = document.getElementById('btnSaveRevert');
+  SaveState.onChange(s => {
+    box.dataset.state = s.status;
+    msg.textContent = s.status === 'saving' ? '저장 중…' : s.status === 'saved' ? '저장됨'
+      : s.status === 'error' ? '저장 실패 ' + s.failed.length + '건' : '';
+    retry.hidden = revert.hidden = s.status !== 'error';
+  });
+  retry.onclick = () => SaveState.retry();
+  revert.onclick = () => confirmable(revert, async () => {
+    revert.textContent = '되돌리기';  // confirmable 이 확정 후 '삭제'로 바꾸므로 복원
+    await SaveState.revert();
+    _initProjFilter(); render(); _afterMutate();
+  }, { label: '변경 버림?' });
+})();
+
 // ─── Init ───
 (async function() {
   try {
