@@ -4,6 +4,7 @@
 팀 인력 투입 현황 관리 Single-Page App (Vanilla JS, 빌드 도구 없음).
 - **투입 현황 뷰**(연도별): 멤버 × 월별 공수 그리드(기준 연도 앞뒤 6개월 포함 24개월), KPI 패널, 연간 스파크라인
 - **가용인력 뷰**: 월별 여유공수 현황, 멤버 검색·스킬 필터
+- **게시판 뷰**: 템플릿 기반 게시판(자유·유지보수 M/D·면담), `BOARD`/`BLOAD`/`BoardAPI` (`data.js`), 명세는 `docs/board-spec.md`
 
 ## 파일 구조
 ```
@@ -12,6 +13,10 @@ wfm/
 ├── style.css    # 전체 CSS (상단 주석에 디자인 시스템/토큰 설명)
 ├── app.js       # UI 로직 (섹션 구분: COMMON / YEAR VIEW / BENCH VIEW)
 ├── wisenm.js    # WiseNTM 공수 산정 화면 (독립 상태 `_wn`, DATA와 무관)
+├── board.js     # 게시판 화면 (목록·검색·합계·상세·댓글·글쓰기, CSV)
+├── board-admin.js # 관리 드로어 게시판/템플릿 탭 (템플릿 필드 편집기)
+├── sql/boards.sql # 게시판 테이블 생성 SQL (사용자가 Supabase 에서 직접 실행)
+├── docs/board-spec.md # 게시판 명세(데이터 형태·API 계약)
 └── data.js      # 데이터 레이어 (Supabase CRUD, 조회 상태 `LOAD`, `showToast`)
 ```
 
@@ -110,6 +115,7 @@ MgmtView  ── 관리 화면 (멤버·프로젝트 CRUD)
 - [x] 접근성: 포커스 트랩, 패널/드로어 inert, 막대 키보드 조작(roving tabindex), aria, 큰 글씨, 대비 개선
 - [x] 관리 드로어: 프로젝트·멤버 추가 버튼을 목록 맨 위(스크롤 시 고정)
 - [x] 저장 상태 표시 + 다시 시도/되돌리기, 편집 중 모달 닫기 경고
+- [x] 게시판(템플릿·버전 관리, 검색, 댓글, M/D 합계, CSV, 관리 탭)
 
 ## 진행 상황 · 결정 · 백로그
 > **`HANDOFF.md` 를 먼저 읽을 것.** 집/회사 PC 가 달라 로컬 기억이 공유되지 않으므로, 대기 중인 결정·백로그·합의 사항·작업 이력은 `HANDOFF.md` 한 곳에만 기록한다. 작업을 끝낼 때 갱신하고 커밋·푸시한다.

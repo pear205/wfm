@@ -179,16 +179,18 @@ const SaveState = {
   // 작업 하나를 실행하고 결과를 기록한다. 절대 reject 하지 않는다(true=성공)
   // 같은 key 의 작업은 순서대로 직렬 실행(_chains), 다른 key 는 동시에 실행한다.
   // pending 은 등록 시점에 센다(대기 중에도 '저장 중').
-  async _run(label, thunk, key, waitAll) {
+  async _run(label, thunk, key, waitAll, deps) {
     const seq = ++this._seq;
     // 같은 key 의 새 쓰기는 이전에 실패한 쓰기를 대체한다. 'reset' 은 실패한 모든 쓰기를 대체
     if (key) this.failed = this.failed.filter(f => key === 'reset' ? false : f.key !== key);
     const gen = key ? (this._gen[key] = (this._gen[key] || 0) + 1) : 0;
     this.pending++;
     // waitAll(삭제 등): 등록 시점에 진행/대기 중인 모든 쓰기가 끝난 뒤 실행(고아 행·되살림 방지). 이후 등록분은 기다리지 않아 교착 없음
-    const before = waitAll ? [...Object.values(this._chains), ...this._inflight] : null;
+    // deps(키 목록): 등록 시점에 해당 key 로 진행/대기 중인 쓰기가 끝난 뒤 실행(FK 순서: 게시물은 템플릿·게시판 업서트 뒤에). 이후 등록분은 기다리지 않음
+    const before = waitAll ? [...Object.values(this._chains), ...this._inflight]
+      : deps ? deps.map(k => this._chains[k]).filter(Boolean) : null;
     const exec = async () => {
-      if (before) await Promise.all(before);
+      if (before && before.length) await Promise.all(before);
       let err = null;
       try { const res = await thunk(); if (res && res.error) err = res.error; }
       catch (e) { err = e; }
@@ -207,7 +209,7 @@ const SaveState = {
     if (err) {
       console.error('저장 실패 [' + label + ']', err);
       if (latest) {
-        this.failed.push({ label, thunk, key, waitAll, seq, message: (err && err.message) || String(err) });
+        this.failed.push({ label, thunk, key, waitAll, deps, seq, message: (err && err.message) || String(err) });
         if (!this._toasted) { this._toasted = true; showToast('저장에 실패했습니다 — 상단에서 다시 시도할 수 있습니다'); }
       }
     }
@@ -218,7 +220,7 @@ const SaveState = {
   async retry() {
     const list = this.failed; this.failed = [];
     this._set();
-    for (const f of list) await this._run(f.label, f.thunk, f.key, f.waitAll);
+    for (const f of list) await this._run(f.label, f.thunk, f.key, f.waitAll, f.deps);
   },
   // timeout 이 지나면 남은 작업이 있어도 포기하고 true 를 돌려준다(revert 가 영원히 멈추지 않도록)
   async _drain(ms = 15000) {
@@ -239,7 +241,13 @@ const SaveState = {
       try {
         let ok;
         let timedOut;
-        do { timedOut = await this._drain(); ok = await loadData(); } while (!timedOut && this._inflight.size);
+        do {
+          timedOut = await this._drain();
+          ok = await loadData();
+          // 게시판을 이미 불러왔다면 함께 되돌린다. 불러오는 중이면 끝나길 기다린 뒤(낡은 읽기) 다시 읽는다. idle/missing 은 건너뜀(실패로 보지 않음)
+          if (_loadBoardsP) { try { await _loadBoardsP; } catch (e) { /* 아래에서 다시 읽는다 */ } }
+          if (BLOAD.status !== 'idle' && BLOAD.status !== 'missing') { const okB = await loadBoards(); ok = ok && okB; }
+        } while (!timedOut && this._inflight.size);
         this.failed = this.failed.filter(f => f.seq > cut);
         this._toasted = false;
         this._set();
@@ -251,7 +259,7 @@ const SaveState = {
   isDirty() { return this.pending > 0 || this.failed.length > 0; },
 };
 // key: 쓰는 행 식별자. 업서트 thunk 는 재시도 시점의 DATA 를 다시 읽어 낡은 값으로 덮어쓰지 않는다
-function _track(label, key, thunk, waitAll) { return SaveState._run(label, thunk, key, waitAll); }
+function _track(label, key, thunk, waitAll, deps) { return SaveState._run(label, thunk, key, waitAll, deps); }
 const _upsertMember  = id => { const m = DATA.members.find(x => x.id === id);  return m ? _sb.from('wfm_members').upsert(_memberToRow(m)) : {}; };
 const _upsertProject = id => { const p = DATA.projects.find(x => x.id === id); return p ? _sb.from('wfm_projects').upsert(_projectToRow(p)) : {}; };
 
@@ -427,5 +435,255 @@ const DataAPI = {
       ]));
       return err ? { error: err } : {};
     });
+  },
+};
+
+// ═══════════════════════════════════════════════════════════
+// 게시판 (docs/board-spec.md) — 템플릿(버전) · 게시판 · 게시물 · 댓글
+// ═══════════════════════════════════════════════════════════
+const BOARD = { templates: [], boards: [], posts: [], comments: [] };
+// status: 'idle' | 'loading' | 'ok' | 'error' | 'missing'(테이블 없음 = sql/boards.sql 미실행)
+const BLOAD = { status: 'idle', errors: [] };
+
+const _iso = v => v ? new Date(v).toISOString() : new Date().toISOString();
+function _rowToTemplate(r) {
+  return { id: r.id, version: r.version, name: r.name, fields: Array.isArray(r.fields) ? r.fields : [],
+           active: r.active !== false, createdAt: _iso(r.created_at) };
+}
+function _templateToRow(t) {
+  return { id: t.id, version: t.version, name: t.name, fields: t.fields || [], active: t.active !== false, created_at: t.createdAt };
+}
+function _rowToBoard(r) {
+  return { id: r.id, name: r.name, templateIds: Array.isArray(r.template_ids) ? r.template_ids : [],
+           allowComments: !!r.allow_comments, sortOrder: r.sort_order ?? 0, active: r.active !== false, createdAt: _iso(r.created_at) };
+}
+function _boardToRow(b) {
+  return { id: b.id, name: b.name, template_ids: b.templateIds || [], allow_comments: !!b.allowComments,
+           sort_order: b.sortOrder ?? 0, active: b.active !== false, created_at: b.createdAt };
+}
+function _rowToPost(r) {
+  return { id: r.id, boardId: r.board_id, templateId: r.template_id, templateVersion: r.template_version,
+           title: r.title || '', authorId: r.author_id || '', data: r.data || {},
+           createdAt: _iso(r.created_at), updatedAt: _iso(r.updated_at || r.created_at) };
+}
+function _postToRow(p) {
+  return { id: p.id, board_id: p.boardId, template_id: p.templateId, template_version: p.templateVersion,
+           title: p.title, author_id: p.authorId, data: p.data || {}, created_at: p.createdAt, updated_at: p.updatedAt };
+}
+function _rowToComment(r) {
+  return { id: r.id, postId: r.post_id, authorId: r.author_id || '', body: r.body || '', createdAt: _iso(r.created_at) };
+}
+function _commentToRow(c) {
+  return { id: c.id, post_id: c.postId, author_id: c.authorId, body: c.body, created_at: c.createdAt };
+}
+
+// ─── 헬퍼 ───
+function latestTemplate(id) {
+  let best = null;
+  for (const t of BOARD.templates) if (t.id === id && (!best || t.version > best.version)) best = t;
+  return best;
+}
+function templateOf(post) {
+  return BOARD.templates.find(t => t.id === post.templateId && t.version === post.templateVersion) || latestTemplate(post.templateId);
+}
+function boardPosts(boardId) {
+  return BOARD.posts.filter(p => p.boardId === boardId).sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+}
+function postComments(postId) {
+  return BOARD.comments.filter(c => c.postId === postId).sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+}
+function templateInUse(id, version) {
+  return BOARD.posts.some(p => p.templateId === id && p.templateVersion === version);
+}
+
+function _isMissingTable(err) {
+  const msg = String((err && err.message) || '');
+  return !!err && (err.code === '42P01' || err.code === 'PGRST205' || /does not exist|schema cache/i.test(msg));
+}
+function _bid(prefix) { return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6).padEnd(4, '0'); }
+
+let _loadBoardsP = null;
+function loadBoards() {
+  if (_loadBoardsP) return _loadBoardsP;
+  _loadBoardsP = (async () => {
+    BLOAD.status = 'loading'; BLOAD.errors = [];
+    const tables = [['wfm_board_templates', '템플릿'], ['wfm_boards', '게시판'], ['wfm_posts', '게시물'], ['wfm_comments', '댓글']];
+    let res = [];
+    let missing = false;
+    try {
+      res = await Promise.all(tables.map(([t]) => _sb.from(t).select('*')));
+      res.forEach((r, i) => {
+        if (!r.error) return;
+        if (_isMissingTable(r.error)) missing = true;
+        BLOAD.errors.push({ table: tables[i][1], message: r.error.message || String(r.error) });
+      });
+    } catch (e) {
+      console.error('Supabase board load error:', e);
+      BLOAD.errors.push({ table: '네트워크', message: (e && e.message) || String(e) });
+    }
+    if (BLOAD.errors.length) {
+      BLOAD.status = missing ? 'missing' : 'error';
+      BOARD.templates = []; BOARD.boards = []; BOARD.posts = []; BOARD.comments = [];
+      return false;
+    }
+    const [tRes, bRes, pRes, cRes] = res;
+    BOARD.templates = (tRes.data || []).map(_rowToTemplate).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : a.version - b.version);
+    BOARD.boards    = (bRes.data || []).map(_rowToBoard).sort((a, b) => a.sortOrder - b.sortOrder);
+    BOARD.posts     = (pRes.data || []).map(_rowToPost);
+    BOARD.comments  = (cRes.data || []).map(_rowToComment);
+    BLOAD.status = 'ok';
+    return true;
+  })().finally(() => { _loadBoardsP = null; });
+  return _loadBoardsP;
+}
+
+// 업서트 thunk: 실행(재시도) 시점의 BOARD 를 다시 읽고, 객체가 사라졌으면 건너뛴다
+const _upsertTemplate = (id, ver) => { const t = BOARD.templates.find(x => x.id === id && x.version === ver); return t ? _sb.from('wfm_board_templates').upsert(_templateToRow(t)) : {}; };
+const _upsertBoard    = id => { const b = BOARD.boards.find(x => x.id === id);   return b ? _sb.from('wfm_boards').upsert(_boardToRow(b)) : {}; };
+const _upsertPost     = id => { const p = BOARD.posts.find(x => x.id === id);    return p ? _sb.from('wfm_posts').upsert(_postToRow(p)) : {}; };
+// 댓글은 글이 로컬에서 사라졌으면(삭제됨) 보내지 않는다(FK 오류 방지)
+const _upsertComment  = id => { const c = BOARD.comments.find(x => x.id === id); return c && BOARD.posts.some(p => p.id === c.postId) ? _sb.from('wfm_comments').upsert(_commentToRow(c)) : {}; };
+
+// 게시물 업서트는 FK(게시판·템플릿 버전) 때문에 해당 행의 업서트가 끝난 뒤에 실행한다
+const _postDeps = p => ['tpl:' + p.templateId + ':' + p.templateVersion, 'brd:' + p.boardId];
+
+// 서버에 있는 게시물 수(필터는 apply 로 지정). 조회 실패 시 -1 — 호출한 쪽은 '있을 수 있음'으로 취급한다
+async function _serverPostCount(apply) {
+  try {
+    const r = await apply(_sb.from('wfm_posts').select('id', { count: 'exact', head: true }));
+    return r && !r.error && typeof r.count === 'number' ? r.count : -1;
+  } catch (e) { return -1; }
+}
+
+const BoardAPI = {
+  loadBoards,
+
+  /* ── 게시물 ── */
+  addPost({ boardId, templateId, templateVersion, title, authorId, data }) {
+    const now = new Date().toISOString();
+    const post = { id: _bid('post_'), boardId, templateId, templateVersion, title, authorId, data: data || {}, createdAt: now, updatedAt: now };
+    BOARD.posts.push(post);
+    _track('게시물 추가', 'post:' + post.id, () => _upsertPost(post.id), false, _postDeps(post));
+    return post;
+  },
+  updatePost(id, { title, authorId, data }) {
+    const i = BOARD.posts.findIndex(p => p.id === id);
+    if (i < 0) return null;
+    const u = {};
+    if (title !== undefined) u.title = title;
+    if (authorId !== undefined) u.authorId = authorId;
+    if (data !== undefined) u.data = data;
+    BOARD.posts[i] = { ...BOARD.posts[i], ...u, updatedAt: new Date().toISOString() };
+    _track('게시물 수정', 'post:' + id, () => _upsertPost(id), false, _postDeps(BOARD.posts[i]));
+    return BOARD.posts[i];
+  },
+  deletePost(id) {
+    BOARD.posts = BOARD.posts.filter(p => p.id !== id);
+    BOARD.comments = BOARD.comments.filter(c => c.postId !== id);   // 서버는 FK cascade
+    _track('게시물 삭제', 'post:' + id, () => BOARD.posts.some(p => p.id === id) ? {} : _sb.from('wfm_posts').delete().eq('id', id), true);
+  },
+
+  /* ── 댓글 ── */
+  addComment({ postId, authorId, body }) {
+    const c = { id: _bid('cmt_'), postId, authorId, body, createdAt: new Date().toISOString() };
+    BOARD.comments.push(c);
+    _track('댓글 추가', 'cmt:' + c.id, () => _upsertComment(c.id), false, ['post:' + postId]);
+    return c;
+  },
+  deleteComment(id) {
+    BOARD.comments = BOARD.comments.filter(c => c.id !== id);
+    _track('댓글 삭제', 'cmt:' + id, () => BOARD.comments.some(c => c.id === id) ? {} : _sb.from('wfm_comments').delete().eq('id', id), true);
+  },
+
+  /* ── 템플릿 (버전 관리) ── */
+  // Promise<template>. 덮어쓰기(같은 버전 갱신) 전에 서버에 그 버전을 쓰는 글(다른 클라이언트 포함)이 있는지 확인하고,
+  // 있거나 확인에 실패하면 새 버전을 만든다.
+  async saveTemplate({ id, name, fields, active }) {
+    let probe = id ? latestTemplate(id) : null;
+    let overwritable = false;
+    if (probe && !templateInUse(probe.id, probe.version)) {
+      const n = await _serverPostCount(q => q.eq('template_id', probe.id).eq('template_version', probe.version));
+      overwritable = n === 0;
+    }
+    // await 이후 로컬 상태를 다시 읽어 판단한다(그 사이 글/버전이 바뀌었을 수 있음)
+    const now = new Date().toISOString();
+    const latest = id ? latestTemplate(id) : null;
+    let t;
+    if (!latest) {
+      t = { id: id || _bid('tpl_'), version: 1, name, fields: _deepCopy(fields || []), active: active !== false, createdAt: now };
+      BOARD.templates.push(t);
+    } else if (!overwritable || !probe || latest.version !== probe.version || templateInUse(latest.id, latest.version)) {
+      t = { id: latest.id, version: latest.version + 1, name, fields: _deepCopy(fields || []), active: active !== false, createdAt: now };
+      BOARD.templates.push(t);
+    } else {
+      const i = BOARD.templates.indexOf(latest);
+      t = BOARD.templates[i] = { ...latest, name, fields: _deepCopy(fields || []), active: active !== false };
+    }
+    const tid = t.id, ver = t.version;
+    _track('템플릿 저장', 'tpl:' + tid + ':' + ver, () => _upsertTemplate(tid, ver));
+    return t;
+  },
+  setTemplateActive(id, active) {
+    BOARD.templates.forEach((t, i) => { if (t.id === id) BOARD.templates[i] = { ...t, active: !!active }; });
+    BOARD.templates.filter(t => t.id === id).forEach(t => {
+      const ver = t.version;
+      _track('템플릿 활성', 'tpl:' + id + ':' + ver, () => _upsertTemplate(id, ver));
+    });
+  },
+  // Promise<true|'in-use'|'check-failed'>. 로컬·서버(다른 클라이언트 포함)에 글이 있으면 'in-use', 서버 확인에 실패하면 'check-failed'(아무것도 바꾸지 않음).
+  // 서버 확인을 먼저 하고 그 뒤에 동기적으로 로컬을 바꾼다. FK(restrict)가 최종 방어선.
+  async deleteTemplate(id) {
+    if (BOARD.posts.some(p => p.templateId === id)) return 'in-use';
+    const n = await _serverPostCount(q => q.eq('template_id', id));
+    if (n !== 0) return n < 0 ? 'check-failed' : 'in-use';
+    if (BOARD.posts.some(p => p.templateId === id)) return 'in-use';   // await 중에 글이 생겼는지 재확인
+    const versions = BOARD.templates.filter(t => t.id === id).map(t => t.version);
+    BOARD.templates = BOARD.templates.filter(t => t.id !== id);
+    BOARD.boards.forEach((b, i) => {
+      if (b.templateIds.includes(id)) {
+        BOARD.boards[i] = { ...b, templateIds: b.templateIds.filter(x => x !== id) };
+        const bid = b.id;
+        _track('게시판 수정', 'brd:' + bid, () => _upsertBoard(bid));
+      }
+    });
+    versions.forEach(ver => {
+      _track('템플릿 삭제', 'tpl:' + id + ':' + ver,
+        () => BOARD.templates.some(t => t.id === id && t.version === ver) ? {} : _sb.from('wfm_board_templates').delete().eq('id', id).eq('version', ver), true);
+    });
+    return true;
+  },
+
+  /* ── 게시판 ── */
+  addBoard({ name, templateIds, allowComments }) {
+    const b = { id: _bid('brd_'), name, templateIds: [...(templateIds || [])], allowComments: !!allowComments,
+                sortOrder: BOARD.boards.reduce((m, x) => Math.max(m, x.sortOrder), -1) + 1, active: true, createdAt: new Date().toISOString() };
+    BOARD.boards.push(b);
+    _track('게시판 추가', 'brd:' + b.id, () => _upsertBoard(b.id));
+    return b;
+  },
+  updateBoard(id, patch) {
+    const i = BOARD.boards.findIndex(b => b.id === id);
+    if (i < 0) return null;
+    BOARD.boards[i] = { ...BOARD.boards[i], ...patch, id };
+    _track('게시판 수정', 'brd:' + id, () => _upsertBoard(id));
+    return BOARD.boards[i];
+  },
+  // Promise<true|'in-use'|'check-failed'>. deleteTemplate 와 같은 규칙(로컬·서버 글 확인 후에만 삭제)
+  async deleteBoard(id) {
+    if (BOARD.posts.some(p => p.boardId === id)) return 'in-use';
+    const n = await _serverPostCount(q => q.eq('board_id', id));
+    if (n !== 0) return n < 0 ? 'check-failed' : 'in-use';
+    if (BOARD.posts.some(p => p.boardId === id)) return 'in-use';
+    BOARD.boards = BOARD.boards.filter(b => b.id !== id);
+    _track('게시판 삭제', 'brd:' + id, () => BOARD.boards.some(b => b.id === id) ? {} : _sb.from('wfm_boards').delete().eq('id', id), true);
+    return true;
+  },
+  reorderBoards(ids) {
+    const map = new Map(BOARD.boards.map(b => [b.id, b]));
+    const ordered = ids.map(id => map.get(id)).filter(Boolean);
+    BOARD.boards.forEach(b => { if (!ids.includes(b.id)) ordered.push(b); });
+    BOARD.boards = ordered;
+    BOARD.boards.forEach((b, i) => { b.sortOrder = i; });
+    _track('게시판 순서', 'reorder:boards', () => BOARD.boards.length ? _sb.from('wfm_boards').upsert(BOARD.boards.map(_boardToRow)) : {});
   },
 };

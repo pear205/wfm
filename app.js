@@ -981,6 +981,7 @@ function openDrawer() {
   document.getElementById('drawerOverlay').style.opacity = '1';
   document.getElementById('drawerOverlay').style.pointerEvents = 'all';
   renderDrawerContent();
+  if (typeof ensureBoardsLoaded === 'function') ensureBoardsLoaded();
 }
 function closeDrawer() {
   const dr = document.getElementById('mgmtDrawer');
@@ -1035,8 +1036,12 @@ function _initDragReorder(container, dataKey, reorderFn) {
 function renderDrawerContent() {
   const tab = state.mgmtTab;
   const body = document.getElementById('drawerBody');
+  document.querySelectorAll('.dtab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
 
-  if (tab === 'members') {
+  if ((tab === 'boards' || tab === 'templates') && typeof renderBoardAdminDrawer === 'function') {
+    renderBoardAdminDrawer(tab, body);
+
+  } else if (tab === 'members') {
     let items = DATA.members.map(mem => `
       <div class="mgmt-item" draggable="true" data-drag-id="${mem.id}">
         <span class="drag-handle" title="순서 변경">⠿</span>
@@ -1982,14 +1987,16 @@ function renderHeaderControls() {
 
   document.getElementById('btnYear').classList.toggle('active', state.viewMode==='year');
   document.getElementById('btnBench').classList.toggle('active', state.viewMode==='bench');
+  document.getElementById('btnBoard').classList.toggle('active', state.viewMode==='board');
   document.getElementById('btnWisenm').classList.toggle('active', state.viewMode==='wisenm');
-  for (const [id, mode] of [['btnYear','year'],['btnBench','bench'],['btnWisenm','wisenm']]) document.getElementById(id).setAttribute('aria-pressed', String(state.viewMode === mode));
+  for (const [id, mode] of [['btnYear','year'],['btnBench','bench'],['btnBoard','board'],['btnWisenm','wisenm']]) document.getElementById(id).setAttribute('aria-pressed', String(state.viewMode === mode));
   document.querySelectorAll('#assignModeSeg .amseg-btn').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.amode === state.assignMode)));
 
   const filterBar = document.getElementById('filterBar');
   const benchFilterBar = document.getElementById('benchFilterBar');
   const isGrid = state.viewMode === 'year' || state.viewMode === 'bench';
-  const yearNav = document.getElementById('prevYear').parentElement || document.querySelector('.hd-nav');
+  // 연도 이동(‹ 연도 › 오늘)은 연도 기준 화면에서만 보인다 (게시판·WiseNTM 은 state.year 를 쓰지 않음)
+  document.querySelector('.hd-nav')?.classList.toggle('hidden', state.viewMode === 'board' || state.viewMode === 'wisenm');
   if (state.viewMode === 'year') {
     filterBar.classList.remove('hidden');
     benchFilterBar.classList.add('hidden');
@@ -2048,6 +2055,10 @@ function render() {
   renderHeaderControls();
   if (state.viewMode !== 'wisenm' && renderDataGate()) return;
   if (state.viewMode==='bench')   renderBenchView();
+  else if (state.viewMode==='board') {
+    document.getElementById('kpi-wrap').innerHTML = '';
+    renderBoardView();
+  }
   else if (state.viewMode==='wisenm') {
     document.getElementById('kpi-wrap').innerHTML = '';
     renderWisenmView();
@@ -2071,6 +2082,7 @@ document.getElementById('nextYear').onclick = () => { state.year++; state._cente
 // View toggle
 document.getElementById('btnYear').onclick   = () => switchView('year');
 document.getElementById('btnBench').onclick  = () => switchView('bench');
+document.getElementById('btnBoard').onclick  = () => switchView('board');
 document.getElementById('btnWisenm').onclick = () => switchView('wisenm');
 
 // Filter bar
@@ -2747,7 +2759,7 @@ const _ppOpts = (() => {
 const _ppSave = () => { try { localStorage.setItem('wfm_ppOpts', JSON.stringify(_ppOpts)); } catch (e) {} };
 const PP_STATUS_ORDER = ['active', 'planned', 'done'];
 
-function _ppList({ range, memberId, selectedId, query, needsPeriod, ignoreOpts }) {
+function _ppList({ range, memberId, selectedId, query, needsPeriod, ignoreOpts, opts = _ppOpts }) {
   const q = (query || '').trim().toLowerCase();
   const overlaps = p => {
     if (!p.start || !p.end) return null;
@@ -2764,8 +2776,8 @@ function _ppList({ range, memberId, selectedId, query, needsPeriod, ignoreOpts }
     const ov = overlaps(p);
     if (needsPeriod && ov === null) return false;
     if (ignoreOpts) return true;
-    if (!_ppOpts.includeDone && p.status === 'done') return false;
-    if (_ppOpts.periodOnly && ov === false) return false;
+    if (!opts.includeDone && p.status === 'done') return false;
+    if (opts.periodOnly && ov === false) return false;
     return true;
   }).map(p => ({ p, busy: busy.has(p.id), noPeriod: !p.start || !p.end }));
   const rank = it => {
@@ -2778,7 +2790,9 @@ function _ppList({ range, memberId, selectedId, query, needsPeriod, ignoreOpts }
 const _ppOpen = new Set();   // 열려 있는 선택창의 close 함수 (모달이 닫힐 때 함께 정리)
 const closeProjectPickers = () => [..._ppOpen].forEach(fn => fn());
 
-function mountProjectPicker(host, { id, value, getRange, getMemberId, needsPeriod = false, placeholder = '프로젝트 검색·선택' }) {
+// opts: 이 선택창만의 옵션 덮어쓰기({includeDone, periodOnly}) — 저장하지 않으며 전역 _ppOpts 를 바꾸지 않는다
+function mountProjectPicker(host, { id, value, getRange, getMemberId, needsPeriod = false, placeholder = '프로젝트 검색·선택', opts: localOpts }) {
+  const O = localOpts ? { ...localOpts } : _ppOpts;   // 로컬 덮어쓰기면 복사본(체크박스·더 보기가 전역에 영향 없음)
   host.innerHTML = `<div class="pp-wrap"><input type="hidden" id="${id}" value="${esc(value || '')}">
     <button type="button" class="pp-btn form-select" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-label="프로젝트 선택"><span class="pp-label"></span><span class="pp-caret">▾</span></button></div>`;
   const hidden = host.querySelector('input'), btn = host.querySelector('.pp-btn'), lbl = host.querySelector('.pp-label');
@@ -2817,10 +2831,10 @@ function mountProjectPicker(host, { id, value, getRange, getMemberId, needsPerio
     document.body.appendChild(dd);
     _ppOpen.add(close); btn.setAttribute('aria-expanded', 'true');
     const search = dd.querySelector('.pp-search'), list = dd.querySelector('.pp-list');
-    const syncOpts = () => dd.querySelectorAll('.pp-opts input').forEach(c => { c.checked = !!_ppOpts[c.dataset.o]; });
+    const syncOpts = () => dd.querySelectorAll('.pp-opts input').forEach(c => { c.checked = !!O[c.dataset.o]; });
     syncOpts();
 
-    const ctx = ignoreOpts => ({ range: getRange(), memberId: getMemberId && getMemberId(), selectedId: hidden.value, query: search.value, needsPeriod, ignoreOpts });
+    const ctx = ignoreOpts => ({ range: getRange(), memberId: getMemberId && getMemberId(), selectedId: hidden.value, query: search.value, needsPeriod, ignoreOpts, opts: O });
     const safeColor = c => /^#[0-9a-f]{3,8}$/i.test(c || '') ? c : '#999';
     const render = () => {
       items = _ppList(ctx(false));
@@ -2874,10 +2888,10 @@ function mountProjectPicker(host, { id, value, getRange, getMemberId, needsPerio
       if (idx !== hi) { hi = idx; list.querySelectorAll('.pp-hi').forEach(x => x.classList.remove('pp-hi')); it.classList.add('pp-hi'); }
     });
     list.addEventListener('click', e => {
-      if (e.target.closest('.pp-more')) { _ppOpts.includeDone = true; _ppOpts.periodOnly = false; syncOpts(); render(); search.focus(); return; }
+      if (e.target.closest('.pp-more')) { O.includeDone = true; O.periodOnly = false; syncOpts(); render(); search.focus(); return; }
       const it = e.target.closest('.pp-item'); if (it) pick(it.dataset.id);
     });
-    dd.querySelector('.pp-opts').addEventListener('change', e => { const o = e.target.dataset.o; if (!o) return; _ppOpts[o] = e.target.checked; _ppSave(); hi = 0; render(); search.focus(); });
+    dd.querySelector('.pp-opts').addEventListener('change', e => { const o = e.target.dataset.o; if (!o) return; O[o] = e.target.checked; if (O === _ppOpts) _ppSave(); hi = 0; render(); search.focus(); });
   };
 
   btn.addEventListener('click', open);

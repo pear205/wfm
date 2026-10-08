@@ -42,6 +42,7 @@
     <div class="view-toggle" role="group" aria-label="화면 선택">
       <button id="btnYear" class="active" aria-pressed="true">투입 현황</button>
       <button id="btnBench" aria-pressed="false">가용인력</button>
+      <button id="btnBoard" aria-pressed="false" title="게시판">게시판</button>
       <button id="btnWisenm" aria-pressed="false" title="WiseN TM 공수 산정">공수 산정</button>
     </div>
     <div class="hd-sep"></div>
@@ -193,7 +194,42 @@
   </div>
 </div>
 
+<!-- Board detail modal -->
+<div class="modal-overlay hidden" id="boardDetailModal" data-backdrop="close" aria-labelledby="boardDetailTitle">
+  <div class="modal-card modal-lg board-detail-card">
+    <div class="modal-header">
+      <span class="modal-title" id="boardDetailTitle"></span>
+      <button class="modal-close-btn" id="boardDetailClose" aria-label="닫기">✕</button>
+    </div>
+    <div class="modal-body" id="boardDetailBody"></div>
+    <div class="modal-footer">
+      <button type="button" class="btn-ghost" id="boardDetailEdit">수정</button>
+      <button type="button" class="btn-danger" id="boardDetailDel">삭제</button>
+      <div style="flex:1"></div>
+      <button type="button" class="btn-ghost" id="boardDetailCloseBtn">닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- Board write/edit modal (after detail modal so it stacks on top) -->
+<div class="modal-overlay hidden" id="boardModal" data-backdrop="close" aria-labelledby="boardFormTitle">
+  <div class="modal-card modal-lg">
+    <div class="modal-header">
+      <span class="modal-title" id="boardFormTitle">글쓰기</span>
+      <button class="modal-close-btn" id="boardFormClose" aria-label="닫기">✕</button>
+    </div>
+    <div class="modal-body" id="boardFormBody"></div>
+    <div class="modal-footer">
+      <div style="flex:1"></div>
+      <button type="button" class="btn-ghost" id="boardFormCancel">취소</button>
+      <button type="button" class="btn-primary" id="boardFormSave">저장</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="data.js"></script>
 <script src="wisenm.js"></script>
+<script src="board.js"></script>
+<script src="board-admin.js"></script>
 <script src="app.js"></script>
