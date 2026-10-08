@@ -16,7 +16,7 @@
 
 ## ⚠️ 사용자 할 일
 - ~~`sql/boards.sql` 실행~~ → 2026-10-08 Supabase 커넥터로 common 프로젝트에 적용 완료(템플릿 4·게시판 3 시드 확인).
-- **보안**: `wfm_allowances` 테이블 RLS 꺼져 있음(Supabase 경고). 다른 테이블처럼 RLS + authenticated 정책을 켤지 결정 필요.
+- ~~`wfm_allowances` RLS 꺼짐~~ → 2026-10-08 RLS + authenticated 전체 권한 정책 적용 완료. 남은 Supabase 보안 권고: Auth 의 유출 비밀번호 차단(Leaked Password Protection) 꺼짐 — 대시보드 Auth 설정에서 켜기 권장.
 - 실제 DB 의 "프로젝트 N / 고객N" 테스트 프로젝트 정리(관리 드로어에서 삭제, 투입 기록도 함께 삭제됨).
 
 ## 대기 중인 결정 (답이 필요한 것)
