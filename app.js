@@ -276,9 +276,6 @@ async function _checkAuth() {
   const deniedEl = document.getElementById('authDenied');
   const deniedMsg = document.getElementById('authDeniedMsg');
   const subtitle = document.getElementById('authSubtitle');
-  const emailEl  = document.getElementById('authEmail');
-  const input    = document.getElementById('authInput');
-  const btn      = document.getElementById('authBtn');
   const gBtn     = document.getElementById('authGoogle');
   const err      = document.getElementById('authError');
   const logout   = document.getElementById('btnLogout');
@@ -286,7 +283,7 @@ async function _checkAuth() {
   function showForm() {
     mainEl.hidden = false; deniedEl.hidden = true;
     subtitle.hidden = false;
-    btn.disabled = false; gBtn.disabled = false; input.value = '';
+    gBtn.disabled = false;
     overlay.classList.remove('hidden');
   }
   function showDenied(email) {
@@ -304,7 +301,7 @@ async function _checkAuth() {
     try { await _sb.auth.signOut(); } catch (e) { console.warn('[auth] signOut failed', e); }
     err.textContent = '';
     showForm();
-    emailEl.focus();
+    gBtn.focus();
   };
   gBtn.onclick = async () => {
     err.textContent = '';
@@ -337,50 +334,18 @@ async function _checkAuth() {
     return;
   }
 
-  return new Promise(resolve => {
-    let last = '';
-    try { last = localStorage.getItem('wfm_lastEmail') || ''; } catch (e) {}
-    emailEl.value = last;
-    if (session) {
-      showDenied(session.user?.email || '');
-    } else {
-      showForm();
-      if (urlError) err.textContent = '로그인 실패: ' + urlError;
-      (last ? input : emailEl).focus();
-    }
-    async function attempt() {
-      const email = emailEl.value.trim();
-      if (!email) {
-        err.textContent = '이메일을 입력하세요.';
-        emailEl.focus();
-        return;
-      }
-      btn.disabled = true;
-      err.textContent = '';
-      const { data, error } = await _sb.auth.signInWithPassword({
-        email,
-        password: input.value,
-      });
-      if (error) {
-        err.textContent = '이메일 또는 비밀번호가 올바르지 않습니다.';
-        input.value = '';
-        input.focus();
-        btn.disabled = false;
-        return;
-      }
-      try { localStorage.setItem('wfm_lastEmail', email); } catch (e) {}
-      if (!(await _isAllowedUser())) {
-        showDenied(data?.user?.email || email);
-        return;
-      }
-      overlay.classList.add('hidden');
-      logout.hidden = false;
-      logout.title = data?.user?.email || email;
-      resolve();
-    }
-    btn.onclick = attempt;
-    [emailEl, input].forEach(el => el.addEventListener('keydown', e => { if (e.key === 'Enter') attempt(); }));
-  });
+  // 오래된 이메일 기억 키 정리 (비밀번호 로그인 제거됨)
+  try { localStorage.removeItem('wfm_lastEmail'); } catch (e) {}
+
+  // 로그인 전: Google 로그인 후 페이지가 다시 로드되므로 앱 초기화는 진행하지 않는다
+  if (session) {
+    showDenied(session.user?.email || '');
+  } else {
+    showForm();
+    if (urlError) err.textContent = '로그인 실패: ' + urlError;
+    gBtn.focus();
+  }
+  return new Promise(() => {});
 }
 
 // ─── 스킬 프리셋 (카테고리별 추천 스킬) ───
