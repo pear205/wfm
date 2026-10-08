@@ -112,6 +112,14 @@ button{cursor:pointer;border:none;background:none;font-family:inherit}
 .hd-nav-btn:hover{background:rgba(255,255,255,.08);color:var(--text-hd)}
 .hd-year{font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:600;color:var(--text-hd);min-width:48px;text-align:center}
 .hd-spacer{flex:1}
+/* 저장 상태(AppBar): 헤더는 테마와 무관하게 어두우므로 밝은 고정 색을 쓴다. idle 이면 숨겨 스페이서가 공간을 흡수 */
+.hd-save{display:flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap;flex-shrink:0;color:var(--text-hd-m)}
+.hd-save[data-state="idle"]{display:none}
+.hd-save[data-state="saved"]{color:#4ADE80}
+.hd-save[data-state="error"] .hd-save-msg{color:#FCA5A5;font-weight:600}
+.hd-save-btn{height:24px;padding:0 9px;border-radius:6px;font-size:11px;font-weight:600;color:var(--text-hd);border:1px solid var(--border-hd);transition:background .15s}
+.hd-save-btn:hover{background:rgba(255,255,255,.12)}
+.hd-save-btn[hidden]{display:none}
 .view-toggle{display:flex;background:rgba(255,255,255,.07);border-radius:7px;padding:2px;gap:1px}
 .view-toggle button{padding:3px 12px;border-radius:5px;font-size:12px;font-weight:500;color:var(--text-hd-m);transition:background .15s,color .15s}
 .view-toggle button.active{background:rgba(255,255,255,.14);color:var(--text-hd)}
@@ -121,7 +129,7 @@ button{cursor:pointer;border:none;background:none;font-family:inherit}
 .hd-mgmt-btn{color:var(--text-hd-m);border:1px solid var(--border-hd);transition:background .15s,color .15s}
 .hd-mgmt-btn:hover{background:rgba(255,255,255,.1);color:var(--text-hd)}
 #header button,.hd-title,.hd-year,.view-toggle{white-space:nowrap;flex-shrink:0}
-@media(max-width:760px){.hd-title,.hd-sep{display:none}#header{gap:8px}}
+@media(max-width:760px){.hd-title,.hd-sep{display:none}#header{gap:8px}.hd-save-msg{display:none}.hd-save[data-state="error"] .hd-save-msg{display:inline}}
 
 /* ─── Subheader ─── */
 #subheader{background:var(--bg-hd-s);color:var(--text-hd);padding:0 var(--gutter);height:34px;display:flex;align-items:center;gap:8px;font-size:12px;border-bottom:1px solid var(--border-hd);flex-shrink:0}

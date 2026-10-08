@@ -34,6 +34,11 @@
       <button class="hd-nav-btn hd-today" id="btnToday" title="오늘(현재 월)로 이동">오늘</button>
     </div>
     <div class="hd-spacer"></div>
+    <div id="saveStatus" class="hd-save" aria-live="polite" data-state="idle">
+      <span class="hd-save-msg" id="saveMsg"></span>
+      <button type="button" class="hd-save-btn" id="btnSaveRetry" hidden>다시 시도</button>
+      <button type="button" class="hd-save-btn is-revert" id="btnSaveRevert" hidden title="저장되지 않은 변경을 버리고 서버 데이터로 되돌립니다">되돌리기</button>
+    </div>
     <div class="view-toggle" role="group" aria-label="화면 선택">
       <button id="btnYear" class="active" aria-pressed="true">투입 현황</button>
       <button id="btnBench" aria-pressed="false">가용인력</button>
