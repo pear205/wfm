@@ -32,6 +32,8 @@ wfm/
 - 월 키: 투입 팝업은 `ymOf(year, month)` = `year*12+month-1` 정수 키를 쓴다. `yearWindow(year)` 는 표에 보이는 구간(기본 앞뒤 6개월 포함 24개월, 토글로 12개월), `_maScope()` 는 팝업이 읽고 쓰는 편집 범위(= 표에 보이는 구간).
 - `LOAD` (`data.js`): 조회 상태 `loading|ok|error`. 실패/빈 데이터는 `renderDataGate()` 가 표 대신 안내한다.
 - `showToast(msg)` / `parseMM()` / `isYM()`: 알림과 입력 검증 공용 헬퍼.
+- `SaveState` (`data.js`): 모든 Supabase 쓰기는 `_track(label, key, thunk)` 경유(키별 순차 실행, 최신 작업이 예전 실패 건을 대체, 재시도는 현재 DATA 재조회). 상단 `#saveStatus` 에 저장 중/저장됨/실패+다시 시도·되돌리기. 새 쓰기 경로를 추가할 때 반드시 `_track` 을 쓴다.
+- `Modal.track(id, getState)` / `Modal.requestClose(id)`: 편집 모달의 변경 감지와 닫기 경고(모달 안 확인 바). 사용자 닫기 경로는 `requestClose`, 저장·삭제 후에는 `Modal.close`.
 
 ## 계산 규칙 (변경 시 반드시 일관 유지)
 - **용량**: `memberActive(m, y, mo)` 가 재직(입사~퇴사 월 포함) 판단의 유일한 기준. 월 용량 = 재직 1명당 1.0 M/M. `monthlyMaxCap`, `getMemberAnnual`, 가용인력 화면, PNG 내보내기가 모두 이것을 쓴다.
@@ -106,7 +108,8 @@ MgmtView  ── 관리 화면 (멤버·프로젝트 CRUD)
 - [x] 조회 실패 오류 화면+재시도 (샘플 자동 대체·자동 업로드 제거)
 - [x] 재직 기반 공통 용량, 필터 일관 적용, KPI/부호/라벨 정리, 입력 검증
 - [x] 접근성: 포커스 트랩, 패널/드로어 inert, 막대 키보드 조작(roving tabindex), aria, 큰 글씨, 대비 개선
-- [x] 관리 드로어: 프로젝트 추가 버튼을 목록 맨 위(스크롤 시 고정)
+- [x] 관리 드로어: 프로젝트·멤버 추가 버튼을 목록 맨 위(스크롤 시 고정)
+- [x] 저장 상태 표시 + 다시 시도/되돌리기, 편집 중 모달 닫기 경고
 
 ## 진행 상황 · 결정 · 백로그
 > **`HANDOFF.md` 를 먼저 읽을 것.** 집/회사 PC 가 달라 로컬 기억이 공유되지 않으므로, 대기 중인 결정·백로그·합의 사항·작업 이력은 `HANDOFF.md` 한 곳에만 기록한다. 작업을 끝낼 때 갱신하고 커밋·푸시한다.

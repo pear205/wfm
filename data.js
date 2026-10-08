@@ -158,7 +158,12 @@ const SaveState = {
   status: 'idle',            // 'idle' | 'saving' | 'saved' | 'error'
   pending: 0,                // 진행 중인 쓰기 수
   failed: [],                // [{label, thunk, message}] 실패 순서 유지
+  reverting: false,          // revert() 진행 중(UI 가 컨트롤을 막을 수 있다)
   _inflight: new Set(),
+  _chains: {},               // key -> 마지막 작업 Promise (같은 key 직렬화)
+  _gen: {},                  // key -> 등록 세대 번호
+  _seq: 0,
+  _revertP: null,
   _listeners: [],
   _toasted: false,           // 연속 실패 시 토스트는 한 번만
   _savedTimer: null,
@@ -172,26 +177,39 @@ const SaveState = {
   },
   _emit() { this._listeners.forEach(fn => { try { fn(this); } catch (e) { console.error(e); } }); },
   // 작업 하나를 실행하고 결과를 기록한다. 절대 reject 하지 않는다(true=성공)
-  async _run(label, thunk, key) {
+  // 같은 key 의 작업은 순서대로 직렬 실행(_chains), 다른 key 는 동시에 실행한다.
+  // pending 은 등록 시점에 센다(대기 중에도 '저장 중').
+  async _run(label, thunk, key, waitAll) {
+    const seq = ++this._seq;
     // 같은 key 의 새 쓰기는 이전에 실패한 쓰기를 대체한다. 'reset' 은 실패한 모든 쓰기를 대체
     if (key) this.failed = this.failed.filter(f => key === 'reset' ? false : f.key !== key);
+    const gen = key ? (this._gen[key] = (this._gen[key] || 0) + 1) : 0;
     this.pending++;
-    const p = (async () => {
+    // waitAll(삭제 등): 등록 시점에 진행/대기 중인 모든 쓰기가 끝난 뒤 실행(고아 행·되살림 방지). 이후 등록분은 기다리지 않아 교착 없음
+    const before = waitAll ? [...Object.values(this._chains), ...this._inflight] : null;
+    const exec = async () => {
+      if (before) await Promise.all(before);
       let err = null;
       try { const res = await thunk(); if (res && res.error) err = res.error; }
       catch (e) { err = e; }
       return err;
-    })();
+    };
+    const p = key ? (this._chains[key] || Promise.resolve()).then(exec) : exec();
+    if (key) this._chains[key] = p;
     this._inflight.add(p);
     this._set();
     const err = await p;
     this._inflight.delete(p);
     this.pending--;
+    const latest = !key || this._gen[key] === gen;   // 더 새로운 같은 key 작업이 있으면 이 결과는 낡았다
+    if (key && this._chains[key] === p) { delete this._chains[key]; delete this._gen[key]; }
     if (!err && this.pending === 0 && this.failed.length === 0) this._toasted = false;
     if (err) {
       console.error('저장 실패 [' + label + ']', err);
-      this.failed.push({ label, thunk, key, message: (err && err.message) || String(err) });
-      if (!this._toasted) { this._toasted = true; showToast('저장에 실패했습니다 — 상단에서 다시 시도할 수 있습니다'); }
+      if (latest) {
+        this.failed.push({ label, thunk, key, waitAll, seq, message: (err && err.message) || String(err) });
+        if (!this._toasted) { this._toasted = true; showToast('저장에 실패했습니다 — 상단에서 다시 시도할 수 있습니다'); }
+      }
     }
     this._set();
     return !err;
@@ -200,19 +218,40 @@ const SaveState = {
   async retry() {
     const list = this.failed; this.failed = [];
     this._set();
-    for (const f of list) await this._run(f.label, f.thunk, f.key);
+    for (const f of list) await this._run(f.label, f.thunk, f.key, f.waitAll);
+  },
+  // timeout 이 지나면 남은 작업이 있어도 포기하고 true 를 돌려준다(revert 가 영원히 멈추지 않도록)
+  async _drain(ms = 15000) {
+    let timer, timedOut = false;
+    const timeout = new Promise(r => { timer = setTimeout(() => { timedOut = true; r(); }, ms); });
+    try { await Promise.race([(async () => { while (this._inflight.size) await Promise.all([...this._inflight]); })(), timeout]); }
+    finally { clearTimeout(timer); }
+    return timedOut;
   },
   // 저장되지 않은 로컬 변경을 버리고 서버 상태를 다시 불러온다. 호출한 쪽이 render() 한다
-  async revert() {
-    await Promise.all([...this._inflight]);
-    this.failed = []; this._toasted = false;
-    this._set();
-    return loadData();
+  // 되돌리는 중에 새로 들어온 쓰기는 버리지 않고 실행하며, 끝날 때까지 기다린 뒤 다시 불러온다.
+  revert() {
+    if (this._revertP) return this._revertP;
+    this.reverting = true;
+    const cut = this._seq;   // 이 시점 이전에 등록된 작업만 실패 목록에서 지운다
+    this._emit();
+    this._revertP = (async () => {
+      try {
+        let ok;
+        let timedOut;
+        do { timedOut = await this._drain(); ok = await loadData(); } while (!timedOut && this._inflight.size);
+        this.failed = this.failed.filter(f => f.seq > cut);
+        this._toasted = false;
+        this._set();
+        return ok;
+      } finally { this.reverting = false; this._revertP = null; this._emit(); }
+    })();
+    return this._revertP;
   },
   isDirty() { return this.pending > 0 || this.failed.length > 0; },
 };
 // key: 쓰는 행 식별자. 업서트 thunk 는 재시도 시점의 DATA 를 다시 읽어 낡은 값으로 덮어쓰지 않는다
-function _track(label, key, thunk) { return SaveState._run(label, thunk, key); }
+function _track(label, key, thunk, waitAll) { return SaveState._run(label, thunk, key, waitAll); }
 const _upsertMember  = id => { const m = DATA.members.find(x => x.id === id);  return m ? _sb.from('wfm_members').upsert(_memberToRow(m)) : {}; };
 const _upsertProject = id => { const p = DATA.projects.find(x => x.id === id); return p ? _sb.from('wfm_projects').upsert(_projectToRow(p)) : {}; };
 
@@ -283,9 +322,9 @@ const DataAPI = {
     DATA.members     = DATA.members.filter(m => m.id !== id);
     DATA.assignments = DATA.assignments.filter(a => a.memberId !== id);
     DATA.allowances  = DATA.allowances.filter(a => a.memberId !== id);
-    _track('멤버 삭제', 'member:' + id, () => _sb.from('wfm_members').delete().eq('id', id));
-    _track('멤버 투입 삭제', 'member-asg:' + id, () => _sb.from('wfm_assignments').delete().eq('member_id', id));
-    _track('멤버 현장수당 삭제', 'member-allow:' + id, () => _sb.from('wfm_allowances').delete().eq('member_id', id));
+    _track('멤버 삭제', 'member:' + id, () => DATA.members.some(m => m.id === id) ? {} : _sb.from('wfm_members').delete().eq('id', id), true);
+    _track('멤버 투입 삭제', 'member-asg:' + id, () => DATA.members.some(m => m.id === id) ? {} : _sb.from('wfm_assignments').delete().eq('member_id', id), true);
+    _track('멤버 현장수당 삭제', 'member-allow:' + id, () => DATA.members.some(m => m.id === id) ? {} : _sb.from('wfm_allowances').delete().eq('member_id', id), true);
   },
 
   reorderProjects(ids) {
@@ -312,8 +351,8 @@ const DataAPI = {
   deleteProject(id) {
     DATA.projects    = DATA.projects.filter(p => p.id !== id);
     DATA.assignments = DATA.assignments.filter(a => a.projectId !== id);
-    _track('프로젝트 삭제', 'project:' + id, () => _sb.from('wfm_projects').delete().eq('id', id));
-    _track('프로젝트 투입 삭제', 'project-asg:' + id, () => _sb.from('wfm_assignments').delete().eq('project_id', id));
+    _track('프로젝트 삭제', 'project:' + id, () => DATA.projects.some(p => p.id === id) ? {} : _sb.from('wfm_projects').delete().eq('id', id), true);
+    _track('프로젝트 투입 삭제', 'project-asg:' + id, () => DATA.projects.some(p => p.id === id) ? {} : _sb.from('wfm_assignments').delete().eq('project_id', id), true);
   },
 
   /* ── 공수 ── */
@@ -334,9 +373,10 @@ const DataAPI = {
     DATA.assignments = DATA.assignments.filter(a =>
       !(a.memberId===memberId && a.projectId===projectId && a.year===year && a.month===month)
     );
-    _track('공수 삭제', 'asg:' + [memberId, projectId, year, month].join(':'), () => _sb.from('wfm_assignments').delete()
-      .eq('member_id', memberId).eq('project_id', projectId)
-      .eq('year', year).eq('month', month));
+    _track('공수 삭제', 'asg:' + [memberId, projectId, year, month].join(':'), () => DATA.assignments.some(a => a.memberId===memberId && a.projectId===projectId && a.year===year && a.month===month) ? {}
+      : _sb.from('wfm_assignments').delete()
+        .eq('member_id', memberId).eq('project_id', projectId)
+        .eq('year', year).eq('month', month));
   },
 
   /* ── 현장수당 ── */
@@ -344,8 +384,9 @@ const DataAPI = {
     const i = DATA.allowances.findIndex(a => a.memberId===memberId && a.year===year && a.month===month);
     if (i >= 0) {
       DATA.allowances.splice(i, 1);
-      _track('현장수당 해제', 'allow:' + [memberId, year, month].join(':'), () => _sb.from('wfm_allowances').delete()
-        .eq('member_id', memberId).eq('year', year).eq('month', month));
+      _track('현장수당 해제', 'allow:' + [memberId, year, month].join(':'), () => DataAPI.hasAllowance(memberId, year, month) ? {}
+        : _sb.from('wfm_allowances').delete()
+          .eq('member_id', memberId).eq('year', year).eq('month', month));
     } else {
       DATA.allowances.push({memberId, year, month});
       // 기본키 구성을 가정하지 않고 멱등하게: 같은 행을 지운 뒤 넣는다(재시도해도 중복되지 않음)

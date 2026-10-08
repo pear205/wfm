@@ -80,6 +80,23 @@ function syncBackgroundInert() {
     || document.getElementById('overlay').classList.contains('show')
     || document.getElementById('mgmtDrawer').classList.contains('open');
   const app = document.getElementById('app'); if (app) app.inert = open;
+  _placeSaveStatus(open);
+}
+// 저장 상태 표시는 #app(inert) 안에 있으면 모달/드로어가 열린 동안 닿을 수 없으므로,
+// 열려 있는 동안만 #app 밖(body) 고정 위치로 옮기고 닫히면 헤더 원래 자리로 되돌린다
+let _saveSlot = null;
+function _placeSaveStatus(open) {
+  const box = document.getElementById('saveStatus'); if (!box) return;
+  if (open && box.parentNode !== document.body) {
+    if (!_saveSlot) _saveSlot = document.createComment('saveStatus');
+    box.parentNode.insertBefore(_saveSlot, box);
+    document.body.appendChild(box);
+    box.classList.add('is-float');
+  } else if (!open && _saveSlot && _saveSlot.parentNode) {
+    _saveSlot.parentNode.insertBefore(box, _saveSlot);
+    _saveSlot.remove();
+    box.classList.remove('is-float');
+  }
 }
 
 const Modal = {
@@ -94,6 +111,7 @@ const Modal = {
   // 저장·삭제 성공 경로는 guard 를 거치지 않는 close(id) 를 그대로 쓴다.
   guards: {},
   _base: {},
+  _barPrev: {},
   // 현재 상태를 기준선으로 저장하고, 이후 getState() 결과가 달라지면 dirty 로 본다
   track(id, getState) {
     this._base[id] = getState();
@@ -109,7 +127,7 @@ const Modal = {
     const card = document.querySelector('#' + id + ' .modal-card');
     let bar = card.querySelector('.modal-confirm');
     if (!bar) {
-      this._barPrev = document.activeElement;
+      this._barPrev[id] = document.activeElement;
       bar = document.createElement('div');
       bar.className = 'modal-confirm';
       bar.setAttribute('role', 'alertdialog');
@@ -130,7 +148,7 @@ const Modal = {
     const bar = document.querySelector('#' + id + ' .modal-confirm');
     if (!bar) return false;
     bar.remove();
-    const prev = this._barPrev; this._barPrev = null;
+    const prev = this._barPrev[id]; delete this._barPrev[id];
     if (restore) {
       const card = document.querySelector('#' + id + ' .modal-card');
       const t = prev && document.contains(prev) && card.contains(prev) ? prev : card;
@@ -178,8 +196,11 @@ document.addEventListener('keydown', e => {
   if (e.key !== 'Tab') return;
   const id = Modal._stack[Modal._stack.length - 1];
   const card = id && document.querySelector('#' + id + ' .modal-card');
-  if (!card || !card.contains(e.target)) return;
-  const f = [...card.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]):not([type=hidden]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')].filter(el => el.offsetParent !== null);
+  // 모달 밖으로 떠 있는 저장 상태 표시(오류 시 다시 시도/되돌리기)도 순환에 포함
+  const fl = document.querySelector('#saveStatus.is-float');
+  if (!card || !(card.contains(e.target) || fl?.contains(e.target))) return;
+  const SEL = 'a[href],button:not([disabled]),input:not([disabled]):not([type=hidden]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+  const f = [...card.querySelectorAll(SEL), ...(fl ? fl.querySelectorAll(SEL) : [])].filter(el => el.offsetParent !== null);
   if (!f.length) return;
   const first = f[0], last = f[f.length - 1];
   if (e.shiftKey && e.target === first) { e.preventDefault(); last.focus(); }
@@ -332,6 +353,7 @@ function getMemberYearStats(memberId, year) {
 function confirmable(btn, onConfirm, { label='정말 삭제?', bg='#c62828', color='' } = {}) {
   if (btn.dataset.confirming) {
     clearTimeout(btn._confirmTimer);
+    btn._confirmCancel = null;
     delete btn.dataset.confirming;
     btn.textContent = '삭제';
     btn.style.background = '';
@@ -344,12 +366,16 @@ function confirmable(btn, onConfirm, { label='정말 삭제?', bg='#c62828', col
   btn.textContent = label;
   btn.style.background = bg;
   btn.style.color = color;
-  btn._confirmTimer = setTimeout(() => {
+  const cancel = () => {
+    clearTimeout(btn._confirmTimer);
     delete btn.dataset.confirming;
     btn.textContent = origText;
     btn.style.background = '';
     btn.style.color = '';
-  }, 3000);
+    btn._confirmCancel = null;
+  };
+  btn._confirmCancel = cancel;
+  btn._confirmTimer = setTimeout(cancel, 3000);
 }
 
 function _afterMutate() {
@@ -1770,7 +1796,7 @@ function openAssignModal(memberId, year, month) {
   Modal.open('assignModal');
 }
 
-function renderAssignModal() {
+function renderAssignModal(keep) {
   const { memberId, year, month } = state.assignCtx;
   const as = getAssignments(memberId, year, month);
   const total = as.reduce((s,a)=>s+getDisplayMM(a), 0);
@@ -1899,7 +1925,13 @@ function renderAssignModal() {
       confirmable(btn, () => {
         const pid = btn.dataset.assignDel;
         DataAPI.deleteAssignment(memberId, pid, year, month);
-        renderAssignModal();
+        const g = id => document.getElementById(id);
+        const wasDirty = !!Modal.guards.assignModal?.();
+        renderAssignModal({
+          dirty: wasDirty,
+          project: g('newAssignProject')?.value, mm: g('newAssignMM')?.value, act: g('newAssignMMActual')?.value,
+          type: document.querySelector('input[name="assignType"]:checked')?.value,
+        });
         render();
       }, { label: '삭제?', bg: '', color: '#DC2626' });
     };
@@ -1907,6 +1939,16 @@ function renderAssignModal() {
 
   // 추가/수정 폼은 렌더 때마다 새로 그려지므로 기준선도 매번 갱신 (저장·삭제 직후 dirty 해제)
   Modal.track('assignModal', _assignFieldsSnap);
+  // 인라인 삭제 등으로 다시 그릴 때 입력 중이던 값 복원 (이전에 dirty 였으면 기준선을 기본값 그대로 두어 dirty 유지, 깨끗했으면 복원 후 기준선 재설정)
+  if (keep) {
+    const q = id => document.getElementById(id);
+    if ([...q('newAssignProject').options].some(o => o.value === keep.project)) q('newAssignProject').value = keep.project;
+    q('newAssignMM').value = keep.mm; q('newAssignMMActual').value = keep.act;
+    const r = document.querySelector(`input[name="assignType"][value="${keep.type}"]`); if (r) r.checked = true;
+    document.getElementById('assignBody').querySelectorAll('[data-amm]').forEach(b =>
+      b.classList.toggle('active', parseFloat(b.dataset.amm) === parseFloat(keep.mm)));
+    if (!keep.dirty) Modal.track('assignModal', _assignFieldsSnap);
+  }
 }
 
 // 공수 추가/수정 폼의 미제출 입력값 (항목 자체는 즉시 저장되므로 이것만 dirty 판단)
@@ -2474,6 +2516,9 @@ document.getElementById('assignClose').onclick = () => Modal.requestClose('assig
 // Escape key
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
+  // 삭제 확인(confirmable) 이 무장된 버튼에 포커스가 있으면 확인만 취소하고 아무것도 닫지 않는다
+  const armed = document.activeElement;
+  if (armed?.dataset?.confirming && armed._confirmCancel) { e.preventDefault(); armed._confirmCancel(); return; }
   if (Modal.closeTop()) return;
   if (document.getElementById('mgmtDrawer').classList.contains('open')) { closeDrawer(); return; }
   closeBottomPanels();
@@ -2911,17 +2956,32 @@ function mountProjectPicker(host, { id, value, getRange, getMemberId, needsPerio
 (function() {
   const box = document.getElementById('saveStatus'), msg = document.getElementById('saveMsg');
   const retry = document.getElementById('btnSaveRetry'), revert = document.getElementById('btnSaveRevert');
-  SaveState.onChange(s => {
+  const paint = s => {
+    const rv = SaveState.reverting === true;
     box.dataset.state = s.status;
-    msg.textContent = s.status === 'saving' ? '저장 중…' : s.status === 'saved' ? '저장됨'
+    msg.textContent = rv ? '되돌리는 중…' : s.status === 'saving' ? '저장 중…' : s.status === 'saved' ? '저장됨'
       : s.status === 'error' ? '저장 실패 ' + s.failed.length + '건' : '';
-    retry.hidden = revert.hidden = s.status !== 'error';
-  });
+    retry.hidden = revert.hidden = !(s.status === 'error' || rv);   // 되돌리는 중에도 버튼을 유지(비활성)해 포커스를 잃지 않게 한다
+    retry.disabled = revert.disabled = rv;
+  };
+  SaveState.onChange(paint);
   retry.onclick = () => SaveState.retry();
   revert.onclick = () => confirmable(revert, async () => {
     revert.textContent = '되돌리기';  // confirmable 이 확정 후 '삭제'로 바꾸므로 복원
-    await SaveState.revert();
+    // 열린 모달은 저장 안 된 편집이 있어도 버린다(사용자가 되돌리기를 확인함). 드로어는 열어 둔 채 다시 그린다
+    [...Modal._stack].forEach(id => Modal.close(id));
+    revert.disabled = retry.disabled = true; msg.textContent = '되돌리는 중…';
+    try { await SaveState.revert(); }
+    finally { paint(SaveState); }
+    // 포커스를 갖고 있던 버튼이 사라졌으면 상태 표시줄로 옮긴다(body 로 떨어지지 않게)
     _initProjFilter(); render(); _afterMutate();
+    // 포커스를 갖고 있던 버튼이 사라졌으면(저장 표시가 숨겨지면 상자도 안 보임) 헤더의 첫 버튼으로 옮긴다
+    const ae = document.activeElement;
+    if (!ae || ae === document.body || ae.offsetParent === null) {
+      const t = box.offsetParent !== null ? box : document.querySelector('#app header button:not([disabled])');
+      if (t === box) box.setAttribute('tabindex', '-1');
+      t?.focus({preventScroll: true});
+    }
   }, { label: '변경 버림?' });
 })();
 
