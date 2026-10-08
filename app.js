@@ -972,8 +972,8 @@ function renderDrawerContent() {
           <button class="btn-icon-sm danger" data-del-member="${mem.id}" title="삭제">✕</button>
         </div>
       </div>`).join('');
-    body.innerHTML = `<div class="mgmt-list" id="memberDragList">${items}</div>
-      <button class="mgmt-add-btn" id="addMemberBtn">+ 멤버 추가</button>`;
+    body.innerHTML = `<button class="mgmt-add-btn is-top" id="addMemberBtn">+ 멤버 추가</button>
+      <div class="mgmt-list" id="memberDragList">${items}</div>`;
     document.getElementById('addMemberBtn').onclick = () => openMemberForm(null);
     _initDragReorder(document.getElementById('memberDragList'), 'mid', DataAPI.reorderMembers.bind(DataAPI));
 
