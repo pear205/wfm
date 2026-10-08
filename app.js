@@ -90,8 +90,57 @@ const Modal = {
     formModal()   { state.formMode = null; _maForm.dragging = _maForm.actDragging = false; _maForm.dragAnchor = null; },
     assignModal() { state.assignCtx = null; },
   },
+  // 편집 중 닫기 경고: guards[id]() 가 true(= 저장 안 된 변경 있음)면 사용자 닫기(X/취소/Escape/배경)를 막고 확인 바를 띄운다.
+  // 저장·삭제 성공 경로는 guard 를 거치지 않는 close(id) 를 그대로 쓴다.
+  guards: {},
+  _base: {},
+  // 현재 상태를 기준선으로 저장하고, 이후 getState() 결과가 달라지면 dirty 로 본다
+  track(id, getState) {
+    this._base[id] = getState();
+    this.guards[id] = () => getState() !== this._base[id];
+  },
+  requestClose(id) {
+    const el = document.getElementById(id);
+    if (el.classList.contains('hidden')) return false;
+    if (this.guards[id]?.()) { this._showConfirm(id); return false; }
+    this.close(id); return true;
+  },
+  _showConfirm(id) {
+    const card = document.querySelector('#' + id + ' .modal-card');
+    let bar = card.querySelector('.modal-confirm');
+    if (!bar) {
+      this._barPrev = document.activeElement;
+      bar = document.createElement('div');
+      bar.className = 'modal-confirm';
+      bar.setAttribute('role', 'alertdialog');
+      bar.setAttribute('aria-labelledby', id + 'ConfirmMsg');
+      bar.innerHTML = `<span class="modal-confirm-msg" id="${id}ConfirmMsg">저장하지 않은 변경 사항이 있습니다.</span>
+        <span class="modal-confirm-btns">
+          <button type="button" class="btn-ghost modal-confirm-keep">계속 편집</button>
+          <button type="button" class="btn-danger modal-confirm-discard">버리고 닫기</button>
+        </span>`;
+      bar.querySelector('.modal-confirm-keep').onclick = () => this._hideConfirm(id, true);
+      bar.querySelector('.modal-confirm-discard').onclick = () => this.close(id);
+      card.appendChild(bar);
+    }
+    bar.querySelector('.modal-confirm-keep').focus({preventScroll: true});
+  },
+  // 확인 바 제거. restore=true 면 바를 띄우기 전 포커스 위치로 복귀
+  _hideConfirm(id, restore) {
+    const bar = document.querySelector('#' + id + ' .modal-confirm');
+    if (!bar) return false;
+    bar.remove();
+    const prev = this._barPrev; this._barPrev = null;
+    if (restore) {
+      const card = document.querySelector('#' + id + ' .modal-card');
+      const t = prev && document.contains(prev) && card.contains(prev) ? prev : card;
+      t.focus({preventScroll: true});
+    }
+    return true;
+  },
   open(id) {
     const el = document.getElementById(id);
+    this._hideConfirm(id, false);
     el.classList.remove('hidden');
     el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true');
     this._stack = this._stack.filter(x => x !== id); this._stack.push(id);
@@ -105,6 +154,8 @@ const Modal = {
     const el = document.getElementById(id);
     if (el.classList.contains('hidden')) return;
     closeProjectPickers();
+    this._hideConfirm(id, false);
+    delete this.guards[id]; delete this._base[id];
     el.classList.add('hidden');
     this._stack = this._stack.filter(x => x !== id);
     this.onClose[id]?.();
@@ -117,7 +168,8 @@ const Modal = {
   closeTop() {
     const id = this._stack[this._stack.length - 1];
     if (!id) return false;
-    this.close(id); return true;
+    if (this._hideConfirm(id, true)) return true; // 확인 바가 떠 있으면 Escape = 계속 편집
+    this.requestClose(id); return true;
   },
 };
 document.addEventListener('mousedown', e => { Modal._down = e.target; });
@@ -135,7 +187,7 @@ document.addEventListener('keydown', e => {
 });
 document.addEventListener('click', e => {
   const t = e.target;
-  if (t.classList?.contains('modal-overlay') && Modal._down === t && t.dataset.backdrop === 'close') Modal.close(t.id);
+  if (t.classList?.contains('modal-overlay') && Modal._down === t && t.dataset.backdrop === 'close') Modal.requestClose(t.id);
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -1134,6 +1186,7 @@ function openMemberForm(memberId) {
 
   bindColorGrid('colorGridMember', 'fMemberColor');
   Modal.open('formModal');
+  Modal.track('formModal', _formFieldsSnap);
 }
 
 function saveMemberForm() {
@@ -1233,6 +1286,7 @@ function openProjectForm(projectId) {
 
   bindColorGrid('colorGridProject', 'fPjColor');
   Modal.open('formModal');
+  Modal.track('formModal', _formFieldsSnap);
 }
 
 function saveProjectForm() {
@@ -1269,6 +1323,15 @@ function deleteProjectConfirm() {
 }
 
 function closeFormModal() { Modal.close('formModal'); }
+
+// 멤버/프로젝트 폼 dirty 비교용 스냅샷: 폼 입력값(숨은 색상·상태 input 포함) + 스킬 목록.
+// 스킬 추가용 임시 select/입력(.sk-form-area)은 제외 — 열고 고르는 것만으로 dirty 가 되지 않게
+function _formFieldsSnap() {
+  const vals = [...document.querySelectorAll('#formContent input,#formContent select,#formContent textarea')]
+    .filter(el => !el.closest('.sk-form-area'))
+    .map(el => (el.type === 'checkbox' || el.type === 'radio') ? el.checked : el.value);
+  return JSON.stringify([vals, state.formMode?.type === 'member' ? state._tmpSkills : null]);
+}
 
 // ═══════════════════════════════════════════════════════════
 // MEMBER-ASSIGN FORM (투입 공수 설정)
@@ -1519,6 +1582,13 @@ function openMemberAssignForm(projectId, memberId, focusYm) {
 
   renderMAFormTrack();
   Modal.open('formModal');
+  // 편집 상태만 비교 (◀▶ 창 이동·헤더 끌기 위치는 제외)
+  Modal.track('formModal', () => JSON.stringify([
+    document.getElementById('maFMember')?.value, document.getElementById('maFProject')?.value,
+    document.querySelector('input[name="maFType"]:checked')?.value,
+    _maForm.start, _maForm.end, _maForm.actStart, _maForm.actEnd,
+    _maForm.mmVals, _maForm.actualVals, [..._maForm.gaps].sort((a, b) => a - b),
+  ]));
 }
 
 function saveMemberAssignForm() {
@@ -1588,6 +1658,7 @@ function openBulkModal(memberId) {
   document.getElementById('bulkTitle').textContent = `${mem?.name} · ${state.year}년 일괄 공수 입력`;
   renderBulkModal();
   Modal.open('bulkModal');
+  Modal.track('bulkModal', () => JSON.stringify([_bulk.projId, _bulk.start, _bulk.end, _bulk.mmVals]));
 }
 
 function renderBulkModal() {
@@ -1818,6 +1889,7 @@ function renderAssignModal() {
       document.getElementById('assignBody').querySelectorAll('[data-amm]').forEach(b =>
         b.classList.toggle('active', parseFloat(b.dataset.amm) === _mp));
       document.querySelector(`input[name="assignType"][value="${existing.type}"]`).checked = true;
+      Modal.track('assignModal', _assignFieldsSnap); // 수정 버튼의 자동 채움은 사용자 입력이 아니므로 기준선 갱신
     };
   });
 
@@ -1832,6 +1904,19 @@ function renderAssignModal() {
       }, { label: '삭제?', bg: '', color: '#DC2626' });
     };
   });
+
+  // 추가/수정 폼은 렌더 때마다 새로 그려지므로 기준선도 매번 갱신 (저장·삭제 직후 dirty 해제)
+  Modal.track('assignModal', _assignFieldsSnap);
+}
+
+// 공수 추가/수정 폼의 미제출 입력값 (항목 자체는 즉시 저장되므로 이것만 dirty 판단)
+function _assignFieldsSnap() {
+  return JSON.stringify([
+    document.getElementById('newAssignProject')?.value,
+    document.getElementById('newAssignMM')?.value,
+    document.getElementById('newAssignMMActual')?.value,
+    document.querySelector('input[name="assignType"]:checked')?.value,
+  ]);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2327,12 +2412,12 @@ document.getElementById('formDeleteBtn').onclick = function() {
     }
   });
 };
-document.getElementById('formCancelBtn').onclick = closeFormModal;
-document.getElementById('formClose').onclick     = closeFormModal;
+document.getElementById('formCancelBtn').onclick = () => Modal.requestClose('formModal');
+document.getElementById('formClose').onclick     = () => Modal.requestClose('formModal');
 
 // Bulk assign modal
-document.getElementById('bulkClose').onclick = () => Modal.close('bulkModal');
-document.getElementById('bulkCancelBtn').onclick = () => Modal.close('bulkModal');
+document.getElementById('bulkClose').onclick = () => Modal.requestClose('bulkModal');
+document.getElementById('bulkCancelBtn').onclick = () => Modal.requestClose('bulkModal');
 document.getElementById('bulkSaveBtn').onclick = saveBulkModal;
 document.addEventListener('mouseup', e => {
   if (_bulk.dragging) {
@@ -2384,7 +2469,7 @@ document.addEventListener('mouseup', e => {
 });
 
 // Assign modal
-document.getElementById('assignClose').onclick = () => Modal.close('assignModal');
+document.getElementById('assignClose').onclick = () => Modal.requestClose('assignModal');
 
 // Escape key
 document.addEventListener('keydown', e => {
