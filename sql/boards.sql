@@ -1,7 +1,7 @@
 -- ═══════════════════════════════════════════════════════════
 -- WFM 게시판 테이블 (docs/board-spec.md)
 -- 사용법: Supabase 대시보드 > SQL Editor 에 이 파일 전체를 붙여넣고 한 번 실행하세요.
--- 여러 번 실행해도 안전합니다(이미 있는 테이블·정책·제약은 건드리지 않음).
+-- 여러 번 실행해도 안전합니다(이미 있는 테이블·정책·제약은 건드리지 않음). 단 sql/allowlist.sql 을 먼저 실행해야 합니다.
 -- 기본 템플릿·게시판은 해당 테이블이 비어 있을 때만 넣습니다(사용자가 지운 기본 데이터를 되살리지 않음).
 -- 게시물은 게시판·템플릿(버전)을 FK(on delete restrict)로 참조합니다: 글이 있는 게시판/템플릿은 서버가 삭제를 거부합니다.
 -- FK 는 NOT VALID 로 추가됩니다(기존 고아 행이 있어도 스크립트가 중단되지 않음; 새/수정 행에는 즉시 적용).
@@ -80,21 +80,22 @@ alter table wfm_boards          enable row level security;
 alter table wfm_posts           enable row level security;
 alter table wfm_comments        enable row level security;
 
-drop policy if exists "wfm_board_templates_auth_all" on wfm_board_templates;
-create policy "wfm_board_templates_auth_all" on wfm_board_templates
-  for all to authenticated using (true) with check (true);
-
-drop policy if exists "wfm_boards_auth_all" on wfm_boards;
-create policy "wfm_boards_auth_all" on wfm_boards
-  for all to authenticated using (true) with check (true);
-
-drop policy if exists "wfm_posts_auth_all" on wfm_posts;
-create policy "wfm_posts_auth_all" on wfm_posts
-  for all to authenticated using (true) with check (true);
-
-drop policy if exists "wfm_comments_auth_all" on wfm_comments;
-create policy "wfm_comments_auth_all" on wfm_comments
-  for all to authenticated using (true) with check (true);
+-- RLS 정책: 허용 목록(sql/allowlist.sql 의 wfm_is_allowed())으로만 접근. 누구나 접근(using (true)) 정책은 만들지 않는다.
+-- 선행 조건: sql/allowlist.sql 을 먼저 실행해 wfm_is_allowed() 가 있어야 한다.
+-- 이미 "<table>_allowed" 정책이 있으면(예: 게시물의 wfm_post_visible 정책) 건드리지 않고, 옛 "_auth_all" 정책만 지운다.
+do $$
+declare t text;
+begin
+  if to_regprocedure('public.wfm_is_allowed()') is null then
+    raise exception 'sql/allowlist.sql 을 먼저 실행하세요 (wfm_is_allowed() 없음)';
+  end if;
+  foreach t in array array['wfm_board_templates','wfm_boards','wfm_posts','wfm_comments'] loop
+    execute format('drop policy if exists "%s_auth_all" on public.%I', t, t);
+    if not exists (select 1 from pg_policies where schemaname='public' and tablename=t and policyname=t||'_allowed') then
+      execute format('create policy "%s_allowed" on public.%I for all to authenticated using (public.wfm_is_allowed()) with check (public.wfm_is_allowed())', t, t);
+    end if;
+  end loop;
+end $$;
 
 -- ─── 기본 템플릿 (테이블이 비어 있을 때만) ───
 do $seed$
