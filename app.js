@@ -105,7 +105,6 @@ const Modal = {
   _focusKey: {},
   onClose: {
     formModal()   { state.formMode = null; _maForm.dragging = _maForm.actDragging = false; _maForm.dragAnchor = null; },
-    assignModal() { state.assignCtx = null; },
   },
   // 편집 중 닫기 경고: guards[id]() 가 true(= 저장 안 된 변경 있음)면 사용자 닫기(X/취소/Escape/배경)를 막고 확인 바를 띄운다.
   // 저장·삭제 성공 경로는 guard 를 거치지 않는 close(id) 를 그대로 쓴다.
@@ -229,7 +228,6 @@ const state = {
   theme: 'system',
   mgmtTab: 'members',
   formMode: null,   // {type:'member'|'project', id:null|string}
-  assignCtx: null,  // {memberId, year, month}
   memberFilter: '',
   projectFilter: '',
   benchMonth: null,
@@ -402,6 +400,11 @@ function monthlyMaxCap(year, month, members = DATA.members) {
   return members.filter(m => memberActive(m, year, month)).length;
 }
 // 멤버의 연간 집계: 재직 월 수(=용량), 투입 합계, 여유(= 용량 - 투입, 여유가 양수/초과가 음수)
+// 멤버 패널의 연간 총 M/M 색: 재직 기준 용량(cap) 대비 — 4% 넘게 초과 over, 83% 넘으면 warn
+function _annualTone(total, cap) {
+  if (cap <= 0) return total > 0 ? 'var(--over)' : 'var(--ok)';
+  return total > cap * 1.04 ? 'var(--over)' : total > cap * 0.83 ? 'var(--warn)' : 'var(--ok)';
+}
 function getMemberAnnual(mem, year) {
   const monthlyTotals = Array.from({length: 12}, (_, i) => Math.round(getTotalMM(mem.id, year, i + 1) * 100) / 100);
   const active = monthlyTotals.map((_, i) => memberActive(mem, year, i + 1));
@@ -981,7 +984,7 @@ function renderMemberPanel(memberId) {
     </div>
     <div class="mp-stats">
       <div class="stat-card"><div class="stat-label">${state.year}년 총 M/M</div>
-        <div class="stat-value" style="color:${stats.totalMM>12.5?'var(--over)':stats.totalMM>10?'var(--warn)':'var(--ok)'}">${stats.totalMM.toFixed(1)}</div></div>
+        <div class="stat-value" style="color:${_annualTone(stats.totalMM, getMemberAnnual(mem, state.year).cap)}">${stats.totalMM.toFixed(1)}</div></div>
       <div class="stat-card"><div class="stat-label">참여 프로젝트</div>
         <div class="stat-value">${stats.projectCount}<span style="font-size:13px;color:var(--text-m)"> 개</span></div></div>
       <div class="stat-card"><div class="stat-label">월평균 M/M</div>
@@ -998,6 +1001,7 @@ function renderMemberPanel(memberId) {
         {key:'lang',  label:'언어 / 프레임워크'},
         {key:'cloud', label:'클라우드'},
         {key:'ai',    label:'AI / ML'},
+        {key:'sol',   label:'솔루션'},
         {key:'etc',   label:'기타'},
       ];
       let html = '<div class="sk-section"><div class="sk-section-title">스킬</div><div class="sk-cats">';
@@ -1225,8 +1229,8 @@ function openMemberForm(memberId) {
   function _renderSkExisting() {
     document.getElementById('skExisting').innerHTML = state._tmpSkills.map((s,i) => {
       const lvLabel = ['하','중','상'][s.lv-1] || '';
-      return `<span class="sk-tag ${s.c}" style="cursor:default">
-        ${s.name}<span class="sk-lv-label">${lvLabel}</span>
+      return `<span class="sk-tag ${esc(s.c)}" style="cursor:default">
+        ${esc(s.name)}<span class="sk-lv-label">${lvLabel}</span>
         <span class="sk-rm-btn" data-sk-idx="${i}" style="margin-left:2px;opacity:.6;cursor:pointer">✕</span>
       </span>`;
     }).join('');
@@ -1865,183 +1869,6 @@ function saveBulkModal() {
 }
 
 // ═══════════════════════════════════════════════════════════
-// ASSIGN MODAL
-// ═══════════════════════════════════════════════════════════
-function openAssignModal(memberId, year, month) {
-  state.assignCtx = {memberId, year, month};
-  const mem = getMember(memberId);
-  document.getElementById('assignTitle').textContent =
-    `${mem?.name} · ${year}년 ${MONTH_KR[month-1]}`;
-  renderAssignModal();
-  Modal.open('assignModal');
-}
-
-function renderAssignModal(keep) {
-  const { memberId, year, month } = state.assignCtx;
-  const as = getAssignments(memberId, year, month);
-  const total = as.reduce((s,a)=>s+getDisplayMM(a), 0);
-
-  // Current assignments list
-  let listHtml = '';
-  if (as.length > 0) {
-    listHtml = as.map(a => {
-      const pj = getProject(a.projectId);
-      if (!pj) return '';
-      const _mp = a.mm_plan != null ? a.mm_plan : (a.mm || 0);
-      const _ma = a.mm_actual || 0;
-      const mmInfo = state.assignMode === 'plan'
-        ? `<b style="font-family:'JetBrains Mono',monospace">${_mp.toFixed(2)} M/M</b> <span style="font-size:10px;color:var(--text-m)">(계획)</span>`
-        : state.assignMode === 'actual'
-          ? `<b style="font-family:'JetBrains Mono',monospace">${_ma > 0 ? _ma.toFixed(2) : _mp.toFixed(2)} M/M</b>${_ma > 0 ? '' : ' <span style="font-size:10px;color:var(--text-m)">(계획)</span>'}`
-          : `<span style="font-size:10px;color:var(--text-m)">계획</span> <b style="font-family:'JetBrains Mono',monospace">${_mp.toFixed(2)}</b> <span style="font-size:10px">→</span> <span style="font-size:10px;color:var(--text-m)">실제</span> <b style="font-family:'JetBrains Mono',monospace;color:${_ma>_mp+0.05?'#c62828':_ma>0?'var(--ok)':'var(--text-s)'}">${_ma > 0 ? _ma.toFixed(2) : '—'}</b>`;
-      return `<div class="assign-item">
-        <div class="assign-item-dot" style="background:${pj.color}"></div>
-        <div style="flex:1">
-          <div class="assign-item-name">${esc(pj.name)}</div>
-          <div class="assign-item-info">${esc(pj.client)} · ${esc(a.type)} · ${mmInfo}</div>
-        </div>
-        <button class="btn-icon-sm" data-assign-edit="${a.projectId}" title="수정">✏</button>
-        <button class="btn-icon-sm danger" data-assign-del="${a.projectId}" title="삭제">✕</button>
-      </div>`;
-    }).join('');
-    if (total > 0) {
-      const cls = mmClass(total);
-      listHtml += `<div style="text-align:right;font-size:12px;color:var(--text-m);margin:4px 2px 10px">
-        합계: <b style="font-family:'JetBrains Mono',monospace;color:${cls==='ok'?'var(--ok)':cls==='warn'?'var(--warn)':'var(--over)'}">${total.toFixed(2)} M/M</b>
-      </div>`;
-    }
-  } else {
-    listHtml = `<div style="font-size:13px;color:var(--text-m);margin-bottom:12px;text-align:center;padding:8px">이 달 투입 없음</div>`;
-  }
-
-  // Add new assignment form
-  const projOptions = DATA.projects.map(pj =>
-    `<option value="${pj.id}">${esc(pj.name)} (${esc(pj.client)})</option>`
-  ).join('');
-
-  listHtml += `<div class="assign-add-form">
-    <div class="assign-add-title">+ 공수 추가</div>
-    <div class="form-group">
-      <label class="form-label">프로젝트</label>
-      <select class="form-select" id="newAssignProject">${projOptions}</select>
-    </div>
-    <div class="form-row">
-      <div class="form-group" style="margin-bottom:0">
-        <label class="form-label">계획 M/M</label>
-        <div style="display:flex;gap:4px;align-items:center">
-          <button class="ma-mm-btn" data-amm="1.0">1</button>
-          <button class="ma-mm-btn" data-amm="0.75">0.75</button>
-          <button class="ma-mm-btn" data-amm="0.5">0.5</button>
-          <button class="ma-mm-btn" data-amm="0.25">0.25</button>
-          <input class="ma-bulk-input" type="number" min="0.05" max="2" step="0.05" value="1.00" id="newAssignMM" style="flex:1;min-width:56px">
-        </div>
-      </div>
-      <div class="form-group" style="margin-bottom:0">
-        <label class="form-label">실제 M/M <span style="color:var(--text-m);font-size:10px">(선택)</span></label>
-        <input class="ma-bulk-input" type="number" min="0" max="2" step="0.05" value="" placeholder="0.00" id="newAssignMMActual" style="width:100%">
-      </div>
-    </div>
-    <div class="form-group" style="margin-bottom:0;margin-top:6px">
-      <label class="form-label">유형</label>
-      <div class="form-radio-group" style="height:36px">
-        <label class="form-radio-label"><input type="radio" name="assignType" value="상주" checked> 상주</label>
-        <label class="form-radio-label"><input type="radio" name="assignType" value="비상주"> 비상주</label>
-      </div>
-    </div>
-    <div style="display:flex;justify-content:flex-end;margin-top:12px">
-      <button class="btn-primary" id="saveNewAssign">추가</button>
-    </div>
-  </div>`;
-
-  document.getElementById('assignBody').innerHTML = listHtml;
-
-  // Quick MM buttons in assign modal
-  document.getElementById('assignBody').querySelectorAll('[data-amm]').forEach(btn => {
-    btn.onclick = () => {
-      document.getElementById('newAssignMM').value = btn.dataset.amm;
-      document.getElementById('assignBody').querySelectorAll('[data-amm]').forEach(b =>
-        b.classList.toggle('active', b === btn));
-    };
-  });
-
-  // Save new
-  document.getElementById('saveNewAssign').onclick = () => {
-    const pid      = document.getElementById('newAssignProject').value;
-    const exRow = as.find(a => a.projectId === pid);
-    const pPlan = parseMM(document.getElementById('newAssignMM').value, exRow ? (exRow.mm_plan != null ? exRow.mm_plan : exRow.mm) : null);
-    const pAct  = parseMM(document.getElementById('newAssignMMActual').value, exRow ? exRow.mm_actual : null);
-    if (pPlan.empty) { showToast('계획 공수를 입력하세요.'); return; }
-    if (pPlan.error) { showToast('계획 ' + pPlan.error); return; }
-    if (pAct.error)  { showToast('실제 ' + pAct.error); return; }
-    const mm_plan = pPlan.value, mm_actual = pAct.value ?? 0;
-    if (mm_plan === 0 && mm_actual === 0) { showToast('계획이 0이면 실제 공수를 함께 입력하세요. (계획 없는 실투입)'); return; }
-    const type     = document.querySelector('input[name="assignType"]:checked').value;
-    DataAPI.setAssignment(memberId, pid, year, month, mm_plan, mm_actual, type);
-    renderAssignModal();
-    render();
-  };
-
-  // Edit existing (click edit button → pre-fill form)
-  document.getElementById('assignBody').querySelectorAll('[data-assign-edit]').forEach(btn => {
-    btn.onclick = () => {
-      const pid = btn.dataset.assignEdit;
-      const existing = as.find(a=>a.projectId===pid);
-      if (!existing) return;
-      const _mp = existing.mm_plan != null ? existing.mm_plan : (existing.mm || 0);
-      const _ma = existing.mm_actual || 0;
-      document.getElementById('newAssignProject').value = pid;
-      document.getElementById('newAssignMM').value = _mp;
-      document.getElementById('newAssignMMActual').value = _ma > 0 ? _ma : '';
-      document.getElementById('assignBody').querySelectorAll('[data-amm]').forEach(b =>
-        b.classList.toggle('active', parseFloat(b.dataset.amm) === _mp));
-      document.querySelector(`input[name="assignType"][value="${existing.type}"]`).checked = true;
-      Modal.track('assignModal', _assignFieldsSnap); // 수정 버튼의 자동 채움은 사용자 입력이 아니므로 기준선 갱신
-    };
-  });
-
-  // Delete
-  document.getElementById('assignBody').querySelectorAll('[data-assign-del]').forEach(btn => {
-    btn.onclick = () => {
-      confirmable(btn, () => {
-        const pid = btn.dataset.assignDel;
-        DataAPI.deleteAssignment(memberId, pid, year, month);
-        const g = id => document.getElementById(id);
-        const wasDirty = !!Modal.guards.assignModal?.();
-        renderAssignModal({
-          dirty: wasDirty,
-          project: g('newAssignProject')?.value, mm: g('newAssignMM')?.value, act: g('newAssignMMActual')?.value,
-          type: document.querySelector('input[name="assignType"]:checked')?.value,
-        });
-        render();
-      }, { label: '삭제?', bg: '', color: '#DC2626' });
-    };
-  });
-
-  // 추가/수정 폼은 렌더 때마다 새로 그려지므로 기준선도 매번 갱신 (저장·삭제 직후 dirty 해제)
-  Modal.track('assignModal', _assignFieldsSnap);
-  // 인라인 삭제 등으로 다시 그릴 때 입력 중이던 값 복원 (이전에 dirty 였으면 기준선을 기본값 그대로 두어 dirty 유지, 깨끗했으면 복원 후 기준선 재설정)
-  if (keep) {
-    const q = id => document.getElementById(id);
-    if ([...q('newAssignProject').options].some(o => o.value === keep.project)) q('newAssignProject').value = keep.project;
-    q('newAssignMM').value = keep.mm; q('newAssignMMActual').value = keep.act;
-    const r = document.querySelector(`input[name="assignType"][value="${keep.type}"]`); if (r) r.checked = true;
-    document.getElementById('assignBody').querySelectorAll('[data-amm]').forEach(b =>
-      b.classList.toggle('active', parseFloat(b.dataset.amm) === parseFloat(keep.mm)));
-    if (!keep.dirty) Modal.track('assignModal', _assignFieldsSnap);
-  }
-}
-
-// 공수 추가/수정 폼의 미제출 입력값 (항목 자체는 즉시 저장되므로 이것만 dirty 판단)
-function _assignFieldsSnap() {
-  return JSON.stringify([
-    document.getElementById('newAssignProject')?.value,
-    document.getElementById('newAssignMM')?.value,
-    document.getElementById('newAssignMMActual')?.value,
-    document.querySelector('input[name="assignType"]:checked')?.value,
-  ]);
-}
-
-// ═══════════════════════════════════════════════════════════
 // HELPERS
 // ═══════════════════════════════════════════════════════════
 function bindColorGrid(gridId, hiddenId) {
@@ -2595,7 +2422,6 @@ document.addEventListener('mouseup', e => {
 });
 
 // Assign modal
-document.getElementById('assignClose').onclick = () => Modal.requestClose('assignModal');
 
 // Escape key
 document.addEventListener('keydown', e => {

@@ -77,7 +77,7 @@
 - **가용인력 필터**: 이름·스킬 필터는 표·합계·KPI·추천 목록에 동일 적용. "선택 월에 여유 있는 멤버만"은 선택 월 기준.
 - 내보내기(PNG/PDF)도 화면과 같은 `getDisplayMM`·`getMemberAnnual` 사용. PDF 는 앞뒤 pad 열 제외.
 
-- **공수 산정 기록** (명세: `docs/estimate-spec.md`, DB: `sql/estimates.sql`): 테이블 `wfm_sales_people / wfm_estimates / wfm_estimate_versions`. 버전 행은 insert-only(불변), 머리말 `current_version` 조건부 update 로 동시 저장 충돌 감지(충돌 시 "최신 버전 기준으로 계속" 선택 가능). 버전마다 **기준표 스냅샷**(`snapshot.basis`)을 저장 → 나중에 기준표 항목 관리 화면을 만들어도 과거 기록은 그때 기준. 계산은 순수 함수 `wnCompute(basis, inputs)` 하나(화면·저장값·이력 공용). 소유권(`created_by`, 이메일)은 서버 트리거가 강제하고 삭제 RLS 는 `created_by = auth.uid()`(클라 `EstimateAPI.canDelete` 가 미러). 지연 로드(`EstimateAPI.load`, `ELOAD`). 미저장 보호: `wnIsDirty/wnLeaveGuard`(화면 전환 `switchView` 훅 + beforeunload). 좁은 화면: ≤900px 1열, 901~1439px 2열, ≥1440px 3열, 표 컨테이너 폭 ≤760px 이면 비고 열 숨김.
+- **공수 산정 기록** (명세: `docs/estimate-spec.md`, DB: `sql/estimates.sql`): 테이블 `wfm_sales_people / wfm_estimates / wfm_estimate_versions`. 버전 행은 insert-only(불변), 머리말 `current_version` 조건부 update 로 동시 저장 충돌 감지(충돌 시 "최신 버전 기준으로 계속" 선택 가능). 버전마다 **기준표 스냅샷**(`snapshot.basis`)을 저장 → 나중에 기준표 항목 관리 화면을 만들어도 과거 기록은 그때 기준. 계산은 순수 함수 `wnCompute(basis, inputs)` 하나(화면·저장값·이력 공용). 소유권(`created_by`, 이메일)은 서버 트리거가 강제하고 삭제 RLS 는 `created_by = auth.uid()`(클라 `EstimateAPI.canDelete` 가 미러). 지연 로드(`EstimateAPI.load`, `ELOAD`). 미저장 보호: `wnLeaveGuard`(화면 전환 `switchView` 훅 + beforeunload). 좁은 화면: ≤900px 1열, 901~1439px 2열, ≥1440px 3열, 표 컨테이너 폭 ≤760px 이면 비고 열 숨김.
 - **산정 기록 알려진 한계(리뷰 지적, 미수정)**: ① 다른 PC 에서 만든 프로젝트를 새로고침 없이 연결된 기록에서 저장하면 `DATA.projects` 낡음 때문에 연결이 해제될 수 있음 ② 복제 진행 중 `_wnNewState`/화면 재진입이 inert 를 풀 수 있음(busy 카운터 필요) ③ 저장 후 편집판 헤더가 서버에서 정리된 salesId/projectId 로 갱신되지 않음 ④ 신규 기록의 버전 insert 가 영구 실패하면 이력 없는 머리말이 남음(삭제만 가능) ⑤ 컨테이너 쿼리로 비고 열을 숨길 때 `colspan=6` 행과 열 수 불일치 가능(실제 화면 확인 필요) ⑥ `_wnStable` 이 NaN→null. 수정 완료: 고아 버전(버전 행만 들어간 채 끊김) 자동 채택 `_adoptOrphanVersion`, 로드 실패 시 미전송 기록 보존, 이력 총공수는 저장값 우선.
 - **개선안 검토 결과(우선순위)**: 지금~다음: 계산 고정 테스트(`wnCompute` 케이스 스냅샷, Node), 스냅샷에 기준표 출처/계산 규칙 리비전, 소프트 삭제(`deleted_at`)+관리자 권한, 저장을 서버 함수(트랜잭션)로(버전 번호 서버 검증), 계산 규칙 데이터화(type+파라미터, eval 금지), 상태 필드(작성 중/검토/확정/무산), 이력 목록은 스냅샷 없이 조회, 버전 간 항목 비교·사유 자동 초안, wisenm.js 분리(계산/화면/기준표 관리), CSV·JSON 내보내기. 보류: 목록 페이지 나누기(300건↑), 통계/알림, 확정→투입 계획 자동 생성(결정 1·P0-01 선행). 하지 말 것: 기준표 항목 제자리 UPDATE·id 변경, 문자열 수식 저장, 기준 변경 시 과거 스냅샷/total_mm 일괄 재계산. 기준표 관리 DB 초안: `wfm_estimate_basis` + `wfm_estimate_basis_versions`(content jsonb, calc_rev, status) + versions 에 `basis_id/basis_version` 추가(null=코드 내장 v0).
 - **다음 단계(미구현)**: 기준표 항목 관리 화면(기준표 자체를 DB 로), 버전 간 항목별 비교, 상태 필드(검토 중/확정), 산정 확정 → 투입 계획 연결. 개선안 검토 결과는 작업 이력 참고.
@@ -104,7 +104,14 @@
 | 6.6 기간·오늘 이동 | ✅ 토글 + 오늘 버튼 |
 | 7 반응형·접근성 | △ 접근성 대부분 완료 / 모바일 미착수 |
 
+## 아이디어 백로그 (2026-10-13 전체 검토, 가치순 · 결정되면 구현)
+- 바로: ① **삭제 전 영향 표시**(멤버/프로젝트 삭제 시 투입·산정·게시물 N건 함께 영향 + "퇴사 월/완료 처리" 유도) ② **퇴사 월 저장 시 영향 목록**(퇴사 뒤 남은 투입이 조용히 "개인 초과"가 됨) ③ **KPI → 주간 점검 목록**(개인 초과·재직 밖·프로젝트 기간 밖 투입, 곧 끝나는 프로젝트와 비는 인원) ④ 프로젝트 패널에 연결된 산정 대비 계획 합 비교(읽기 전용, 실제 합은 P0-01 영향) ⑤ 변경 이력 서버 트리거 감사 로그(`wfm_posts` 제외, 결정 9 전)
+- 다음: 기간+월 필요 M/M+스킬로 투입 가능 인력 조회, 포커스 시 새로 불러오기/"새 데이터 있음" 배너(다른 PC 변경 반영, `CUR_YEAR` 고정 문제 포함), 투입 옮기기·프로젝트 연장, "예정 프로젝트 제외" 보기(`getAssignments` 한 곳에서), 프로젝트×월 뷰, 투입 표 CSV·요약 텍스트 복사, 전체 JSON 백업, 계산 순수 함수 분리 + `node --test`(wnCompute 포함), 클라이언트 오류 수집, 읽기 전용 역할(결정 9 와 함께)
+- 하지 말 것: 확인 없는 산정→투입 자동 생성(초안+확인까지만; P0-01·역할→멤버 매핑 선행), 클라이언트에서 감사 기록, 실시간 동시 편집, 이메일/푸시 알림, 결정 전 M/D→M/M 합산·모바일 전용 화면, 프레임워크/빌드 도입
+- 확인 필요(미수정): PNG 내보내기가 화면 필터를 무시하고 전체 멤버를 그림(의도인지 결정), `board.js` 댓글/글 삭제 실패 처리, `data.js addMember` 의 `'m'+Date.now()` id, 남은 CSS 공통화 후보(빈 상태 박스·오류/필수 문구·체크박스 라벨·표, `estAdminStyle` 이전, `!important` 정리 — 시각 비교 필요해 보류)
+
 ## 작업 이력 (최근 → 과거, 2026-10-07 세션 위주)
+- (2026-10-13) **정리**: 쓰지 않는 레거시 공수 모달(`openAssignModal`·`renderAssignModal`·`#assignModal`, 약 190줄)과 전용/미사용 CSS 15줄 삭제, `wnIsDirty`·`_wnClone`(→`_deepCopy`) 제거. 결함 수정: 멤버 패널 스킬에 솔루션(`sol`) 카테고리 누락, 멤버 폼 스킬 태그 이스케이프(`esc`), 멤버 패널 연간 M/M 색을 재직 기준 용량 대비(`_annualTone`)로. 감사(CSS/JS/아이디어) 3건 병렬 + 브라우저 회귀(4개 뷰·멤버 패널·드로어 탭) 통과.
 - (2026-10-13) **공수 산정 기록**: 계획 확정(시안 D, 영업 별도 목록, 참여자 선택+직접, 만든 사람만 삭제, 이력 보기+복원) → 하위 모델 병렬 구현(데이터 층 / 영업 관리 / 화면) → mock 브라우저 검증(저장·충돌·복원·복제·삭제·프로젝트 삭제·레이아웃 5개 폭) + 읽기 전용 리뷰 여러 차례(동시 저장 유실, 소유권 위조 → 서버 트리거, projectId 부활, 입력 손실, 접근성 등 수정) → 산정 계산 동등성 3,027 케이스 확인. 새 파일 `estimate-admin.js`, `docs/estimate-spec.md`, `sql/estimates.sql`.
 - (2026-10-09) 이메일/비밀번호 로그인 제거: `#authEmail/#authInput/#authBtn`·구분선·관련 CSS·`wfm_lastEmail` 처리 삭제, 구글 버튼만 남김(허용 목록 확인·다른 계정 로그인·로그아웃 유지).
 - (2026-10-09) 구글 로그인 버튼(PKCE)·복귀 처리·허용 목록 확인·로그아웃 버튼, DB 허용 목록 + 전체 테이블 RLS 교체(시뮬레이션: 허용 계정 정상, 비허용 0건).

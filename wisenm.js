@@ -39,8 +39,7 @@ const WN_VAR_COLOR  = '#8A8D9F';
 const WN_LIMITS = { title:100, client:100, ptName:40, ptRole:40, memo:2000, reason:200 };
 
 // ─── 기본값 / 정규화 (스냅샷 복원에도 사용) ───
-const _wnClone = o => JSON.parse(JSON.stringify(o));
-function _wnDefaultBasis() { return { roles: _wnClone(WISENM_ROLES), vars: _wnClone(WISENM_VARS) }; }
+function _wnDefaultBasis() { return { roles: _deepCopy(WISENM_ROLES), vars: _deepCopy(WISENM_VARS) }; }
 function _wnDefaultInputs() {
   return {
     dur: 2,
@@ -70,13 +69,13 @@ function _wnNormalizeBasis(b) {
   const d = _wnDefaultBasis();
   if (!b || typeof b !== 'object') return d;
   return {
-    roles: Array.isArray(b.roles) && b.roles.length ? _wnClone(b.roles) : d.roles,
-    vars:  Array.isArray(b.vars)  && b.vars.length  ? _wnClone(b.vars)  : d.vars,
+    roles: Array.isArray(b.roles) && b.roles.length ? _deepCopy(b.roles) : d.roles,
+    vars:  Array.isArray(b.vars)  && b.vars.length  ? _deepCopy(b.vars)  : d.vars,
   };
 }
 function _wnNormalizeInputs(src) {
   const d = _wnDefaultInputs(), s = src && typeof src === 'object' ? src : {};
-  const obj = v => (v && typeof v === 'object' && !Array.isArray(v)) ? _wnClone(v) : {};
+  const obj = v => (v && typeof v === 'object' && !Array.isArray(v)) ? _deepCopy(v) : {};
   const items = Array.isArray(s.siItems)
     ? s.siItems.filter(i => i && i.id != null).map(i => ({ id:String(i.id), name:String(i.name ?? ''), mm:Number(i.mm) || 0, checked:!!i.checked }))
     : d.siItems;
@@ -265,11 +264,10 @@ function _wnSnapshot() {
   header.title = header.title.trim(); header.client = header.client.trim();
   header.participants = header.participants.map(p => ({ ...p, name: p.name.trim(), role: p.role.trim() }));
   header.salesName = _wnSalesName(header.salesId);
-  return _wnClone({ header, basis: _wn.basis, inputs: _wn.inputs });
+  return _deepCopy({ header, basis: _wn.basis, inputs: _wn.inputs });
 }
 
 // 외부 노출: 저장 안 된 변경 여부 / 화면 이탈 보호 (switchView 가 사용)
-function wnIsDirty() { return !!_wn.dirty; }
 function wnLeaveGuard(proceed) {
   if (typeof proceed !== 'function') return;
   if (!_wn.dirty || typeof document === 'undefined' || !document.getElementById('wnEstGuard')) { proceed(); return; }

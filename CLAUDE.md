@@ -12,7 +12,7 @@ wfm/
 ├── index.html   # HTML 뼈대
 ├── style.css    # 전체 CSS (상단 주석에 디자인 시스템/토큰 설명)
 ├── app.js       # UI 로직 (섹션 구분: COMMON / YEAR VIEW / BENCH VIEW)
-├── wisenm.js    # WiseNTM 공수 산정 + 산정 기록(시안 D). 독립 상태 `_wn`, 순수 계산 `wnCompute`, `wnIsDirty/wnLeaveGuard`
+├── wisenm.js    # WiseNTM 공수 산정 + 산정 기록(시안 D). 독립 상태 `_wn`, 순수 계산 `wnCompute`, `wnLeaveGuard`
 ├── estimate-admin.js # 관리 드로어 "영업 담당" 탭 (`renderSalesAdminDrawer`)
 ├── sql/estimates.sql # 산정 기록 테이블·RLS·가드 트리거(적용 완료)
 ├── docs/estimate-spec.md # 산정 기록 명세(데이터 형태·`EstimateAPI` 계약)
@@ -40,7 +40,7 @@ wfm/
 - 월 키: 투입 팝업은 `ymOf(year, month)` = `year*12+month-1` 정수 키를 쓴다. `yearWindow(year)` 는 표에 보이는 구간(기본 앞뒤 6개월 포함 24개월, 토글로 12개월), `_maScope()` 는 팝업이 읽고 쓰는 편집 범위(= 표에 보이는 구간).
 - `LOAD` (`data.js`): 조회 상태 `loading|ok|error`. 실패/빈 데이터는 `renderDataGate()` 가 표 대신 안내한다.
 - `showToast(msg)` / `parseMM()` / `isYM()`: 알림과 입력 검증 공용 헬퍼.
-- **산정 기록**: `EST`(영업·기록 머리말·버전 캐시) / `ELOAD`(`idle|loading|ok|missing|error`) / `EstimateAPI`(`load, loadVersions, save, copy, remove, canDelete, saveSales…`, 계약은 `docs/estimate-spec.md`). 버전은 불변(insert-only), 동시 저장은 `current_version` 조건부 update 로 감지. 계산은 `wnCompute(basis, inputs)` 한 곳만 쓴다(화면·저장 총공수·이력 공용). 미저장 보호는 `wnIsDirty/wnLeaveGuard`(`switchView` 가 호출).
+- **산정 기록**: `EST`(영업·기록 머리말·버전 캐시) / `ELOAD`(`idle|loading|ok|missing|error`) / `EstimateAPI`(`load, loadVersions, save, copy, remove, canDelete, saveSales…`, 계약은 `docs/estimate-spec.md`). 버전은 불변(insert-only), 동시 저장은 `current_version` 조건부 update 로 감지. 계산은 `wnCompute(basis, inputs)` 한 곳만 쓴다(화면·저장 총공수·이력 공용). 미저장 보호는 `wnLeaveGuard`(`switchView` 가 호출).
 - `SaveState` (`data.js`): 모든 Supabase 쓰기는 `_track(label, key, thunk)` 경유(키별 순차 실행, 최신 작업이 예전 실패 건을 대체, 재시도는 현재 DATA 재조회). 상단 `#saveStatus` 에 저장 중/저장됨/실패+다시 시도·되돌리기. 새 쓰기 경로를 추가할 때 반드시 `_track` 을 쓴다.
 - `Modal.track(id, getState)` / `Modal.requestClose(id)`: 편집 모달의 변경 감지와 닫기 경고(모달 안 확인 바). 사용자 닫기 경로는 `requestClose`, 저장·삭제 후에는 `Modal.close`.
 
