@@ -194,27 +194,37 @@ function _deepCopy(obj) { return JSON.parse(JSON.stringify(obj)); }
 // 조회 상태: 'loading' | 'ok' | 'error'. 실패해도 샘플 데이터로 대체하거나 기본 데이터를 업로드하지 않는다.
 const LOAD = { status: 'loading', errors: [] };
 
-async function loadData() {
-  LOAD.status = 'loading'; LOAD.errors = [];
+// 네 테이블을 읽어 { errors, data } 로 돌려준다. DATA 는 건드리지 않는다(백그라운드 새로 고침이 실패해도 화면을 지우지 않도록).
+async function fetchData() {
   const tables = [['wfm_members', '멤버'], ['wfm_projects', '프로젝트'], ['wfm_assignments', '투입'], ['wfm_allowances', '현장수당']];
+  const errors = [];
   let res = [];
   try {
     res = await Promise.all(tables.map(([t]) => _sb.from(t).select('*')));
-    res.forEach((r, i) => { if (r.error) LOAD.errors.push({ table: tables[i][1], message: r.error.message || String(r.error) }); });
+    res.forEach((r, i) => { if (r.error) errors.push({ table: tables[i][1], message: r.error.message || String(r.error) }); });
   } catch (e) {
     console.error('Supabase load error:', e);
-    LOAD.errors.push({ table: '네트워크', message: (e && e.message) || String(e) });
+    errors.push({ table: '네트워크', message: (e && e.message) || String(e) });
   }
-  if (LOAD.errors.length) {
+  if (errors.length) return { errors, data: null };
+  const [mRes, pRes, aRes, alRes] = res;
+  return { errors, data: {
+    members:     (mRes.data  || []).map(_rowToMember).sort((a,b) => a.sort_order - b.sort_order),
+    projects:    (pRes.data  || []).map(_rowToProject).sort((a,b) => a.sort_order - b.sort_order),
+    assignments: (aRes.data  || []).map(_rowToAssignment),
+    allowances:  (alRes.data || []).map(_rowToAllowance),
+  } };
+}
+async function loadData() {
+  LOAD.status = 'loading'; LOAD.errors = [];
+  const { errors, data } = await fetchData();
+  LOAD.errors = errors;
+  if (errors.length) {
     LOAD.status = 'error';
     DATA.members = []; DATA.projects = []; DATA.assignments = []; DATA.allowances = [];
     return false;
   }
-  const [mRes, pRes, aRes, alRes] = res;
-  DATA.members     = (mRes.data  || []).map(_rowToMember).sort((a,b) => a.sort_order - b.sort_order);
-  DATA.projects    = (pRes.data  || []).map(_rowToProject).sort((a,b) => a.sort_order - b.sort_order);
-  DATA.assignments = (aRes.data  || []).map(_rowToAssignment);
-  DATA.allowances  = (alRes.data || []).map(_rowToAllowance);
+  Object.assign(DATA, data);
   LOAD.status = 'ok';
   return true;
 }

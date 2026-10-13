@@ -85,7 +85,7 @@ function _wnNormalizeInputs(src) {
   const only = (o, keep) => Object.keys(o).reduce((r, k) => { if (keep(o[k])) r[k] = o[k]; return r; }, {});
   return {
     dur: Number.isFinite(dur) ? Math.min(24, Math.max(1, dur)) : d.dur,
-    custom: obj(s.custom),
+    custom: only(obj(s.custom), v => typeof v === 'number' && Number.isFinite(v) && v >= 0),   // 숫자만(문자열이면 합계가 문자열 연결이 됨)
     vars: only(obj(s.vars), v => v != null && v !== ''),
     roleChecked: only(obj(s.roleChecked), v => v === false),
     varChecked: only(obj(s.varChecked), v => v === true),

@@ -430,14 +430,14 @@ function confirmable(btn, onConfirm, { label='정말 삭제?', bg='#c62828', col
     clearTimeout(btn._confirmTimer);
     btn._confirmCancel = null;
     delete btn.dataset.confirming;
-    btn.textContent = '삭제';
+    btn.textContent = btn._confirmOrig ?? '삭제';   // 무장 전 글자로 되돌림(삭제가 아닌 확인 버튼에도 쓰임)
     btn.style.background = '';
     btn.style.color = '';
     onConfirm();
     return;
   }
   btn.dataset.confirming = '1';
-  const origText = btn.textContent;
+  const origText = btn._confirmOrig = btn.textContent;
   btn.textContent = label;
   btn.style.background = bg;
   btn.style.color = color;
@@ -538,8 +538,8 @@ function renderYearView() {
   document.getElementById('kpi-wrap').innerHTML = `<div class="kpi-panel"><div class="kpi-cards">
     <div class="kpi-card" title="재직 인원 기준 연간 투입 합계"><div class="kpi-card__label">연간 팀 M/M</div><div class="kpi-card__value" style="color:${_totalCol}">${_teamTotal.toFixed(1)}</div></div>
     <div class="kpi-card" title="투입 합계 ÷ 재직 용량"><div class="kpi-card__label">평균 가동률</div><div class="kpi-card__value">${_utilPct}%</div></div>
-    <div class="kpi-card" title="팀 전체 투입이 재직 인원 수(용량)를 넘은 월 수"><div class="kpi-card__label">팀 총량 초과 월</div><div class="kpi-card__value" style="color:${_overMo>0?'var(--over)':'var(--text-s)'}">${_overMo}</div></div>
-    <div class="kpi-card" title="개인이 한 달 용량(1.0 M/M, 0.05 허용)을 넘게 배정된 (멤버·월) 건수. 재직 기간 밖 투입도 포함"><div class="kpi-card__label">개인 초과 투입</div><div class="kpi-card__value" style="color:${_overPerson>0?'var(--over)':'var(--text-s)'}">${_overPerson}</div></div>
+    <div class="kpi-card kpi-card--action" role="button" tabindex="0" data-ops-check title="팀 전체 투입이 재직 인원 수(용량)를 넘은 월 수 · 눌러서 점검 목록 보기"><div class="kpi-card__label">팀 총량 초과 월 <span class="kpi-card__more" aria-hidden="true">›</span></div><div class="kpi-card__value" style="color:${_overMo>0?'var(--over)':'var(--text-s)'}">${_overMo}</div></div>
+    <div class="kpi-card kpi-card--action" role="button" tabindex="0" data-ops-check title="개인이 한 달 용량(1.0 M/M, 0.05 허용)을 넘게 배정된 (멤버·월) 건수. 재직 기간 밖 투입도 포함 · 눌러서 점검 목록 보기"><div class="kpi-card__label">개인 초과 투입 <span class="kpi-card__more" aria-hidden="true">›</span></div><div class="kpi-card__value" style="color:${_overPerson>0?'var(--over)':'var(--text-s)'}">${_overPerson}</div></div>
     <div class="kpi-card" title="재직 용량 - 투입 (양수=여유, 음수=초과)"><div class="kpi-card__label">연간 여유 M/M</div><div class="kpi-card__value" style="color:${_availDispCol}">${_teamAvailFmt}</div></div>
   </div><div class="kpi-scope">${esc(_scopeTxt)}</div></div>`;
 
@@ -951,7 +951,8 @@ function renderProjectPanel(projectId) {
       <div class="pj-meta-item"><span class="pj-meta-label">${state.year}년 M/M</span><span class="pj-meta-value" style="font-family:'JetBrains Mono',monospace">${yearMM.toFixed(1)} M/M</span></div>
     </div>
     <div style="font-size:13px;color:var(--text-s);line-height:1.6;margin-bottom:14px">${esc(pj.desc||'')}</div>
-    ${chips ? `<div class="pj-team-title">투입 인원 (${state.year}년)</div><div class="pj-team-list">${chips}</div>` : ''}`;
+    ${chips ? `<div class="pj-team-title">투입 인원 (${state.year}년)</div><div class="pj-team-list">${chips}</div>` : ''}
+    ${opsProjectEstimateHtml(pj)}`;
 
   openBottomPanel('project');
 }
@@ -1317,11 +1318,14 @@ function saveMemberForm() {
   const start = startRaw ? parseInt(startRaw.replace('-', '')) : null;
   const end   = endRaw   ? parseInt(endRaw.replace('-', ''))   : null;
   if (start && end && start > end) { showToast('퇴사 월이 입사 월보다 빠릅니다.'); return; }
+  const prev = id ? getMember(id) : null;
+  const prevStart = prev?.start, prevEnd = prev?.end;
   if (id) { DataAPI.updateMember(id, {name, role, color, skills, start, end}); }
   else    { DataAPI.addMember({name, role, color, skills, start, end}); }
   closeFormModal();
   render();
   _afterMutate();
+  if (id) opsAfterTenureChange(id, prevStart, prevEnd);   // 재직 기간 밖에 남은 투입 정리 안내 (ops.js)
 }
 
 function deleteMemberConfirm() {
@@ -1433,6 +1437,7 @@ function deleteProjectConfirm() {
   const { id } = state.formMode;
   if (!id) return;
   DataAPI.deleteProject(id);
+  EST.estimates.forEach(e => { if (e.projectId === id) e.projectId = null; });   // DB 는 on delete set null — 로컬도 맞춘다
   closeFormModal();
   render();
   _afterMutate();
@@ -2330,6 +2335,7 @@ document.getElementById('drawerBody').addEventListener('click', e => {
   if (editM) { openMemberForm(editM.dataset.editMember); return; }
   const delM = e.target.closest('[data-del-member]');
   if (delM) {
+    opsWarnDelete(delM, 'member', delM.dataset.delMember);
     confirmable(delM, () => {
       state.formMode = {type:'member', id: delM.dataset.delMember};
       deleteMemberConfirm();
@@ -2340,6 +2346,7 @@ document.getElementById('drawerBody').addEventListener('click', e => {
   if (editP) { openProjectForm(editP.dataset.editProject); return; }
   const delP = e.target.closest('[data-del-project]');
   if (delP) {
+    opsWarnDelete(delP, 'project', delP.dataset.delProject);
     confirmable(delP, () => {
       state.formMode = {type:'project', id: delP.dataset.delProject};
       deleteProjectConfirm();
@@ -2355,6 +2362,8 @@ document.getElementById('formSaveBtn').onclick = () => {
 };
 document.getElementById('formDeleteBtn').onclick = function() {
   const btn = this;
+  const fm = state.formMode;
+  if (fm?.type === 'member' || fm?.type === 'project') opsWarnDelete(btn, fm.type, fm.id);
   confirmable(btn, () => {
     if (state.formMode?.type==='member')  deleteMemberConfirm();
     else if (state.formMode?.type==='project') deleteProjectConfirm();
