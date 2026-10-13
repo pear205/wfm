@@ -328,6 +328,7 @@ async function _checkAuth() {
   _cleanAuthUrl();
 
   if (session && await _isAllowedUser()) {
+    CURRENT_USER.id = session.user?.id || null; CURRENT_USER.email = session.user?.email || '';
     overlay.classList.add('hidden');
     logout.hidden = false;
     logout.title = session.user?.email || '';
@@ -1109,7 +1110,10 @@ function renderDrawerContent() {
   const body = document.getElementById('drawerBody');
   document.querySelectorAll('.dtab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
 
-  if ((tab === 'boards' || tab === 'templates') && typeof renderBoardAdminDrawer === 'function') {
+  if (tab === 'sales' && typeof renderSalesAdminDrawer === 'function') {
+    renderSalesAdminDrawer(body);
+
+  } else if ((tab === 'boards' || tab === 'templates') && typeof renderBoardAdminDrawer === 'function') {
     renderBoardAdminDrawer(tab, body);
 
   } else if (tab === 'members') {
@@ -2080,7 +2084,12 @@ function renderHeaderControls() {
   }
 }
 
+// 공수 산정 화면에 저장하지 않은 변경이 있으면 확인 후 이동
 function switchView(mode) {
+  if (state.viewMode === 'wisenm' && mode !== 'wisenm' && typeof wnLeaveGuard === 'function') { wnLeaveGuard(() => _switchViewNow(mode)); return; }
+  _switchViewNow(mode);
+}
+function _switchViewNow(mode) {
   state.viewMode = mode;
   if (mode === 'year') state._center = true;
   state.memberFilter = '';
@@ -2990,7 +2999,7 @@ function mountProjectPicker(host, { id, value, getRange, getMemberId, needsPerio
 
   gw.addEventListener('pointerdown', e => {
     if (e.pointerType !== 'mouse' || e.button !== 0) return;
-    if (e.target.closest('input,select,textarea,a,label')) return;
+    if (e.target.closest('input,select,textarea,a,label,.wn-est')) return;   // 공수 산정 화면은 목록·패널 조작과 텍스트 선택을 우선
     stopFling();
     st = { x: e.clientX, y: e.clientY, sl: gw.scrollLeft, stp: gw.scrollTop, moved: false, vx: 0, vy: 0, lx: e.clientX, ly: e.clientY, lt: e.timeStamp };
   });

@@ -55,6 +55,9 @@ function _rowToAllowance(r) {
 // ─── 런타임 데이터 ───
 const DATA = { members: [], projects: [], assignments: [], allowances: [] };
 
+// 현재 로그인한 사용자 (app.js _checkAuth 가 채움). 산정 기록의 "내가 만든 기록" 판단에 사용
+const CURRENT_USER = { id: null, email: "" };
+
 // 화면 하단 알림 (저장 실패, 입력 오류 공용)
 function showToast(message) {
   let t = document.getElementById('dbToast');
@@ -162,6 +165,9 @@ const SaveState = {
           // 게시판을 이미 불러왔다면 함께 되돌린다. 불러오는 중이면 끝나길 기다린 뒤(낡은 읽기) 다시 읽는다. idle/missing 은 건너뜀(실패로 보지 않음)
           if (_loadBoardsP) { try { await _loadBoardsP; } catch (e) { /* 아래에서 다시 읽는다 */ } }
           if (BLOAD.status !== 'idle' && BLOAD.status !== 'missing') { const okB = await loadBoards(); ok = ok && okB; }
+          // 산정 기록도 같은 규칙(이미 불러왔다면 함께 되돌린다)
+          if (_loadEstP) { try { await _loadEstP; } catch (e) { /* 아래에서 다시 읽는다 */ } }
+          if (ELOAD.status !== 'idle' && ELOAD.status !== 'missing') { const okE = await loadEstimates(); ok = ok && okE; }
         } while (!timedOut && this._inflight.size);
         this.failed = this.failed.filter(f => f.seq > cut);
         this._toasted = false;
@@ -568,5 +574,340 @@ const BoardAPI = {
     BOARD.boards = ordered;
     BOARD.boards.forEach((b, i) => { b.sortOrder = i; });
     _track('게시판 순서', 'reorder:boards', () => BOARD.boards.length ? _sb.from('wfm_boards').upsert(BOARD.boards.map(_boardToRow)) : {});
+  },
+};
+
+// ═══════════════════════════════════════════════════════════
+// 공수 산정 기록 (docs/estimate-spec.md) — DATA/BOARD 와 독립. revert() 만 함께 되돌린다
+// ═══════════════════════════════════════════════════════════
+const EST   = { sales: [], estimates: [], versions: {} };
+const ELOAD = { status: 'idle', errors: [] };
+
+function _rowToSales(r) {
+  return { id: r.id, name: r.name, dept: r.dept || '', active: r.active !== false, sortOrder: r.sort_order ?? 0, createdAt: r.created_at || '' };
+}
+function _salesToRow(s) {
+  return { id: s.id, name: s.name, dept: s.dept || '', active: s.active !== false, sort_order: s.sortOrder ?? 0 };
+}
+function _rowToEstimate(r) {
+  return { id: r.id, title: r.title || '', client: r.client || '', salesId: r.sales_id || null, projectId: r.project_id || null,
+           estimatedOn: r.estimated_on || '', participants: Array.isArray(r.participants) ? r.participants : [], memo: r.memo || '',
+           currentVersion: Number(r.current_version) || 1, totalMm: Number(r.total_mm) || 0,
+           createdAt: r.created_at || '', updatedAt: r.updated_at || '', createdBy: r.created_by || null, createdByEmail: r.created_by_email || '' };
+}
+// created_by / created_by_email 은 서버 기본값이 채우므로 보내지 않는다(update 가 덮어쓰지 않도록)
+function _estimateToRow(e) {
+  return { id: e.id, title: e.title || '', client: e.client || '', sales_id: e.salesId || null, project_id: e.projectId || null,
+           estimated_on: e.estimatedOn, participants: e.participants || [], memo: e.memo || '',
+           current_version: e.currentVersion, total_mm: e.totalMm || 0, updated_at: e.updatedAt };
+}
+function _rowToEstimateVersion(r) {
+  return { estimateId: r.estimate_id, version: Number(r.version) || 0, reason: r.reason || '', snapshot: r.snapshot || {},
+           totalMm: Number(r.total_mm) || 0, savedAt: r.saved_at || '', savedByEmail: r.saved_by_email || '' };
+}
+// 버전 행은 insert 전용. saved_at / saved_by_email 은 서버 기본값
+function _estimateVersionToRow(v) {
+  return { estimate_id: v.estimateId, version: v.version, reason: v.reason, snapshot: v.snapshot, total_mm: v.totalMm };
+}
+
+function salesName(id) { const s = EST.sales.find(x => x.id === id); return s ? s.name : ''; }
+function estimateById(id) { return EST.estimates.find(e => e.id === id) || null; }
+function latestEstimateVersion(id) {
+  const list = EST.versions[id];
+  return list && list.length ? list.reduce((a, b) => (b.version > a.version ? b : a)) : null;
+}
+
+const _estOnServer = new Set();   // 서버에 머리말 행이 있는 id (신규=insert / 기존=update 구분)
+const _estOutbox = {};            // id -> 아직 서버에 확정되지 않은 저장 항목(버전 행 + 머리말). 같은 키의 새 저장이 실패 항목을 대체해도 사라지지 않게 한다
+
+let _loadEstP = null;
+function loadEstimates() {
+  if (_loadEstP) return _loadEstP;
+  _loadEstP = (async () => {
+    ELOAD.status = 'loading'; ELOAD.errors = [];
+    await SaveState._drain();   // 진행 중인 저장이 서버에 반영된 뒤 읽는다(낙관적 로컬 상태를 낡은 스냅샷으로 덮지 않도록)
+    const tables = [['wfm_sales_people', '영업 담당'], ['wfm_estimates', '산정 기록']];
+    let res = [];
+    let missing = false;
+    try {
+      res = await Promise.all(tables.map(([t]) => _sb.from(t).select('*')));
+      res.forEach((r, i) => {
+        if (!r.error) return;
+        if (_isMissingTable(r.error)) missing = true;
+        ELOAD.errors.push({ table: tables[i][1], message: r.error.message || String(r.error) });
+      });
+    } catch (e) {
+      console.error('Supabase estimate load error:', e);
+      ELOAD.errors.push({ table: '네트워크', message: (e && e.message) || String(e) });
+    }
+    if (ELOAD.errors.length) {
+      ELOAD.status = missing ? 'missing' : 'error';
+      EST.sales = []; EST.versions = {};
+      EST.estimates = EST.estimates.filter(e => (_estOutbox[e.id] || []).length);   // 아직 서버에 못 보낸 기록은 잃지 않도록 유지
+      return false;
+    }
+    const [sRes, eRes] = res;
+    EST.sales = (sRes.data || []).map(_rowToSales).sort((a, b) => a.sortOrder - b.sortOrder || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    const unsent = EST.estimates.filter(e => (_estOutbox[e.id] || []).length);   // 실패해 재시도 대기 중인 기록은 로컬 값을 유지
+    EST.estimates = (eRes.data || []).map(_rowToEstimate).filter(e => !unsent.some(u => u.id === e.id)).concat(unsent)
+      .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
+    EST.versions = {};
+    _estOnServer.clear(); (eRes.data || []).forEach(r => _estOnServer.add(r.id));
+    ELOAD.status = 'ok';
+    return true;
+  })().finally(() => { _loadEstP = null; });
+  return _loadEstP;
+}
+
+const _upsertSales = id => { const s = EST.sales.find(x => x.id === id); return s ? _sb.from('wfm_sales_people').upsert(_salesToRow(s)) : {}; };
+
+// 같은 (estimate_id, version) 행이 이미 있으면: 내용(snapshot)이 같을 때만 재시도 중복으로 보고 성공, 다르면 다른 PC 가 먼저 저장한 것(conflict)
+function _jsonEq(a, b) {
+  const norm = v => Array.isArray(v) ? v.map(norm) : v && typeof v === 'object' ? Object.keys(v).sort().reduce((o, k) => (o[k] = norm(v[k]), o), {}) : v;
+  return JSON.stringify(norm(a)) === JSON.stringify(norm(b));   // jsonb 는 키 순서를 보존하지 않는다
+}
+async function _insertEstimateVersion(row) {
+  const q = await _sb.from('wfm_estimate_versions').insert(row);
+  if (!q.error) return {};
+  if (q.error.code !== '23505') return q;
+  const s = await _sb.from('wfm_estimate_versions').select('snapshot').eq('estimate_id', row.estimate_id).eq('version', row.version).maybeSingle();
+  if (s.error) return s;
+  return s.data && _jsonEq(s.data.snapshot, row.snapshot) ? {} : { conflict: true };
+}
+// 낙관적으로 반영했던 로컬 변경을 되돌리고(이 항목과 그 뒤 항목), 이미 호출자에게 성공을 돌려줬다면 토스트로 알린다
+const EST_CONFLICT_MSG = '다른 곳에서 먼저 저장되었습니다. 새로고침 후 다시 저장하세요';
+function _estConflict(id, en) {
+  const list = _estOutbox[id] || [];
+  const i = list.indexOf(en);
+  const dropped = i >= 0 ? list.slice(i) : [en];
+  if (i >= 0) _estOutbox[id] = list.slice(0, i);
+  const local = estimateById(id);
+  if (local && dropped.some(x => x.est === local)) {
+    const idx = EST.estimates.indexOf(local);
+    if (en.prev) EST.estimates[idx] = en.prev; else EST.estimates.splice(idx, 1);
+  }
+  if (EST.versions[id]) EST.versions[id] = EST.versions[id].filter(v => !dropped.some(x => x.ver === v));
+  dropped.forEach(x => { x.conflict = true; });
+  if (dropped.some(x => x.detached)) showToast(EST_CONFLICT_MSG);
+}
+// 버전 행만 들어가고 머리말 갱신 전에 끊긴 '고아 버전'이 있으면(버전 행은 수정·삭제 불가) 그 버전을 현재로 채택해 머리말을 맞춘다.
+// 그래야 이후 "최신 버전 기준으로 계속"이 같은 충돌을 되풀이하지 않는다. 실패해도 저장 결과에는 영향 없음(best-effort)
+async function _adoptOrphanVersion(id) {
+  try {
+    const h = await _sb.from('wfm_estimates').select('current_version').eq('id', id).maybeSingle();
+    if (h.error || !h.data) return;
+    const cv = Number(h.data.current_version);
+    const m = await _sb.from('wfm_estimate_versions').select('version,total_mm').eq('estimate_id', id).order('version', { ascending: false }).limit(1).maybeSingle();
+    if (m.error || !m.data || Number(m.data.version) <= cv) return;
+    await _sb.from('wfm_estimates').update({ current_version: Number(m.data.version), total_mm: Number(m.data.total_mm) || 0 }).eq('id', id).eq('current_version', cv);
+  } catch (e) { console.warn('orphan version adopt failed', e); }
+}
+// 항목 하나를 서버에 반영: 신규는 머리말 insert → 버전 행, 기존은 버전 행 → 머리말 update(current_version 조건).
+// 버전 행(PK)이 먼저 자리를 잡으므로 동시 저장 중 한쪽만 통과하고, 실패해도 이력 없는 머리말이 남지 않는다.
+async function _syncEstimateEntry(id, en, last) {
+  const cur = estimateById(id);
+  const row = { ...(last && cur ? _estimateToRow(cur) : en.header), current_version: en.version };
+  if (en.version === 1) {
+    if (!_estOnServer.has(id)) {
+      const r = await _sb.from('wfm_estimates').insert(row);
+      if (r.error && r.error.code !== '23505') return r;
+      _estOnServer.add(id);
+    } else {   // 재시도: 머리말이 이미 있으면 최신 로컬 값으로 갱신
+      const { id: _id, ...rest } = row;
+      const r = await _sb.from('wfm_estimates').update(rest).eq('id', id);
+      if (r.error) return r;
+    }
+    return _insertEstimateVersion(en.row);
+  }
+  const v = await _insertEstimateVersion(en.row);
+  if (v.conflict) await _adoptOrphanVersion(id);
+  if (v.error || v.conflict) return v;
+  const { id: _id, ...rest } = row;
+  const u = await _sb.from('wfm_estimates').update(rest).eq('id', id).eq('current_version', en.version - 1).select('id');
+  if (u.error) return u;
+  if (u.data && u.data.length) return {};
+  // 0행: 이미 반영된 재시도이거나, 서버 버전이 달라진 것(conflict)
+  const c = await _sb.from('wfm_estimates').select('current_version').eq('id', id).maybeSingle();
+  if (c.error) return c;
+  if (!c.data) return { error: { message: '서버에 산정 기록이 없습니다(삭제되었을 수 있습니다)' } };
+  return Number(c.data.current_version) === en.version ? {} : { conflict: true };
+}
+// 실행 시점의 outbox 를 순서대로 처리한다. 기록이 로컬에서 사라졌으면 건너뛴다. 재시도해도 안전
+async function _syncEstimate(id) {
+  if (!estimateById(id)) { delete _estOutbox[id]; return {}; }
+  for (const en of (_estOutbox[id] || []).slice()) {
+    if (!(_estOutbox[id] || []).includes(en)) continue;
+    const list = _estOutbox[id];
+    const r = await _syncEstimateEntry(id, en, en === list[list.length - 1]);
+    if (r.conflict) { _estConflict(id, en); return {}; }
+    if (r.error) return r;
+    _estOutbox[id] = (_estOutbox[id] || []).filter(x => x !== en);
+  }
+  return {};
+}
+
+async function _serverEstimateCount(apply) {
+  try {
+    const r = await apply(_sb.from('wfm_estimates').select('id', { count: 'exact', head: true }));
+    return r && !r.error && typeof r.count === 'number' ? r.count : -1;
+  } catch (e) { return -1; }
+}
+
+const EstimateAPI = {
+  load: loadEstimates,
+
+  // Promise<EstimateVersion[]>. 서버 이력 + 아직 못 보낸 로컬 버전. 실패 시 reject
+  async loadVersions(id) {
+    const r = await _sb.from('wfm_estimate_versions').select('*').eq('estimate_id', id).order('version', { ascending: true });
+    if (r.error) throw r.error;
+    const list = (r.data || []).map(_rowToEstimateVersion);
+    (_estOutbox[id] || []).forEach(en => { if (!list.some(v => v.version === en.version)) list.push(en.ver); });
+    list.sort((a, b) => a.version - b.version);
+    if (estimateById(id)) EST.versions[id] = list;
+    return list;
+  },
+
+  // {id?, header:{title,client,salesId,projectId,estimatedOn,participants,memo,totalMm}, snapshot, reason, baseVersion}
+  async save({ id, header, snapshot, reason, baseVersion }) {
+    const h = header || {};
+    const isNew = !id;
+    const eid = id || _bid('est_');
+    const key = 'est:' + eid;
+    let why = String(reason || '').trim();
+    const base = Number(baseVersion) || 0;
+    if (isNew) { if (!why) why = '최초 작성'; }
+    else if (!why) return { ok: false, code: 'invalid', message: '변경 사유를 입력하세요' };
+    if (!isNew) {
+      if (!estimateById(eid)) return { ok: false, code: 'error', message: '산정 기록을 찾을 수 없습니다' };
+      if (SaveState.failed.some(f => f.key === key)) return { ok: false, code: 'error', message: '이전 저장이 아직 반영되지 않았습니다. 다시 시도한 뒤 저장하세요' };
+      if (SaveState._chains[key]) await SaveState._chains[key];   // 앞선 저장이 서버에 반영된 뒤 버전을 비교한다
+      let cur;
+      try {
+        const r = await _sb.from('wfm_estimates').select('current_version').eq('id', eid).maybeSingle();
+        if (r.error) throw r.error;
+        cur = r.data ? Number(r.data.current_version) : null;
+      } catch (e) { return { ok: false, code: 'error', message: (e && e.message) || '버전을 확인하지 못했습니다' }; }
+      if (cur === null) return { ok: false, code: 'error', message: '서버에 산정 기록이 없습니다(삭제되었을 수 있습니다)' };
+      if (cur < base) return { ok: false, code: 'error', message: '서버에 아직 반영되지 않은 이전 저장이 있습니다. 잠시 후 다시 시도하세요' };
+      if (cur > base) return { ok: false, code: 'conflict', message: EST_CONFLICT_MSG };
+    }
+    // await 이후 로컬 상태를 다시 읽어 판단한다(그 사이 다른 저장이 끼었을 수 있음)
+    const prev = isNew ? null : estimateById(eid);
+    if (!isNew && !prev) return { ok: false, code: 'error', message: '산정 기록을 찾을 수 없습니다' };
+    if (prev && prev.currentVersion !== base) return { ok: false, code: 'conflict', message: EST_CONFLICT_MSG };
+    const now = new Date().toISOString();
+    const version = isNew ? 1 : base + 1;
+    const est = {
+      id: eid, title: h.title || '', client: h.client || '', salesId: h.salesId || null, projectId: h.projectId || null,
+      estimatedOn: h.estimatedOn || now.slice(0, 10), participants: _deepCopy(h.participants || []), memo: h.memo || '',
+      currentVersion: version, totalMm: Number(h.totalMm) || 0,
+      createdAt: prev ? prev.createdAt : now, updatedAt: now,
+      createdBy: prev ? prev.createdBy : CURRENT_USER.id, createdByEmail: prev ? prev.createdByEmail : CURRENT_USER.email,
+    };
+    const ver = { estimateId: eid, version, reason: why, snapshot: _deepCopy(snapshot || {}), totalMm: est.totalMm, savedAt: now, savedByEmail: CURRENT_USER.email };
+    const en = { version, base, row: _estimateVersionToRow(ver), header: _estimateToRow(est), est, prev, ver, salesId: est.salesId, projectId: est.projectId, conflict: false, detached: false };
+    if (prev) EST.estimates[EST.estimates.indexOf(prev)] = est; else EST.estimates.unshift(est);
+    if (EST.versions[eid]) EST.versions[eid] = EST.versions[eid].filter(v => v.version !== version).concat(ver);
+    (_estOutbox[eid] = _estOutbox[eid] || []).push(en);
+    // FK: 방금 추가한 영업 담당·프로젝트가 서버에 올라간 뒤에 저장한다
+    const deps = [];
+    _estOutbox[eid].forEach(x => { if (x.salesId) deps.push('sales:' + x.salesId); if (x.projectId) deps.push('project:' + x.projectId); });
+    await _track('산정 저장', key, () => _syncEstimate(eid), false, [...new Set(deps)]);
+    if (en.conflict) return { ok: false, code: 'conflict', message: EST_CONFLICT_MSG };
+    en.detached = true;   // 이후의 conflict 는 토스트로 알린다
+    return { ok: true, estimate: est, version: ver };
+  },
+
+  // Promise<Estimate>. 최신 버전 snapshot 으로 새 기록(v1). 실패 시 throw
+  async copy(id) {
+    const src = estimateById(id);
+    if (!src) throw new Error('원본 산정 기록을 찾을 수 없습니다');
+    let v = latestEstimateVersion(id);
+    if (!v || v.version < src.currentVersion) { await EstimateAPI.loadVersions(id); v = latestEstimateVersion(id); }
+    if (!v) throw new Error('원본 산정 이력을 읽지 못했습니다');
+    const title = src.title + ' (복사)';
+    const snapshot = _deepCopy(v.snapshot);
+    snapshot.header = { ...(snapshot.header || {}), title };
+    const r = await EstimateAPI.save({
+      header: { title, client: src.client, salesId: src.salesId, projectId: src.projectId, estimatedOn: src.estimatedOn,
+                participants: src.participants, memo: src.memo, totalMm: v.totalMm },
+      snapshot, reason: '복제: ' + src.title, baseVersion: 0,
+    });
+    if (!r.ok) throw new Error(r.message);
+    return r.estimate;
+  },
+
+  canDelete(est) { return !!(est && est.createdBy && est.createdBy === CURRENT_USER.id); },
+
+  // Promise<true|'not-owner'|'error'>. 낙관적으로 지우고, 서버가 실제로 지우지 못하면(RLS 포함) 로컬을 복구한다
+  async remove(id) {
+    const est = estimateById(id);
+    if (!est || !EstimateAPI.canDelete(est)) return 'not-owner';
+    const key = 'est:' + id;
+    const idx = EST.estimates.indexOf(est);
+    const cachedVersions = EST.versions[id];
+    const outbox = _estOutbox[id];
+    EST.estimates.splice(idx, 1);
+    delete EST.versions[id]; delete _estOutbox[id];
+    const ok = await _track('산정 삭제', key, async () => {
+      if (estimateById(id)) return {};   // 그 사이 복구됨
+      if (!_estOnServer.has(id)) return {};   // 서버에 올라간 적 없음
+      const r = await _sb.from('wfm_estimates').delete().eq('id', id).select('id');
+      if (r.error) return r;
+      if (!(r.data && r.data.length)) {   // 0행: 다른 PC 가 이미 지웠으면 성공, 아직 있으면 RLS 가 막은 것
+        const c = await _sb.from('wfm_estimates').select('id').eq('id', id).maybeSingle();
+        if (c.error) return c;
+        if (c.data) return { error: { message: '산정 기록을 삭제하지 못했습니다(권한 없음)' } };
+      }
+      return r;
+    }, true);
+    if (ok) { _estOnServer.delete(id); return true; }
+    if (!estimateById(id)) {
+      EST.estimates.splice(Math.min(idx, EST.estimates.length), 0, est);
+      if (cachedVersions) EST.versions[id] = cachedVersions;
+      if (outbox) _estOutbox[id] = outbox;
+    }
+    SaveState.failed = SaveState.failed.filter(f => !(f.key === key && f.label === '산정 삭제'));   // 복구했으므로 재시도 대상이 아니다
+    SaveState._set();
+    return 'error';
+  },
+
+  /* ── 영업 담당 ── */
+  saveSales({ id, name, dept, active }) {
+    const i = id ? EST.sales.findIndex(s => s.id === id) : -1;
+    let s;
+    if (i >= 0) s = EST.sales[i] = { ...EST.sales[i], name, dept: dept || '', active: active !== false };
+    else {
+      s = { id: id || _bid('sal_'), name, dept: dept || '', active: active !== false,
+            sortOrder: EST.sales.reduce((m, x) => Math.max(m, x.sortOrder), -1) + 1, createdAt: new Date().toISOString() };
+      EST.sales.push(s);
+    }
+    const sid = s.id;
+    _track('영업 담당 저장', 'sales:' + sid, () => _upsertSales(sid));
+    return s;
+  },
+  setSalesActive(id, active) {
+    const i = EST.sales.findIndex(s => s.id === id);
+    if (i < 0) return;
+    EST.sales[i] = { ...EST.sales[i], active: !!active };
+    _track('영업 담당 활성', 'sales:' + id, () => _upsertSales(id));
+  },
+  // Promise<true|'in-use'|'check-failed'>. 서버 확인 먼저, 그 뒤 동기적으로 로컬 변경. FK(restrict)가 최종 방어선
+  async removeSales(id) {
+    if (EST.estimates.some(e => e.salesId === id)) return 'in-use';
+    const n = await _serverEstimateCount(q => q.eq('sales_id', id));
+    if (n !== 0) return n < 0 ? 'check-failed' : 'in-use';
+    if (EST.estimates.some(e => e.salesId === id)) return 'in-use';
+    // 서버 삭제가 성공한 뒤에 로컬을 지운다(그 사이 FK 가 막으면 로컬은 그대로)
+    const key = 'sales:' + id;
+    let err = null;
+    const ok = await _track('영업 담당 삭제', key, async () => { const r = await _sb.from('wfm_sales_people').delete().eq('id', id); if (r.error) err = r.error; return r; }, true);
+    if (!ok) {
+      SaveState.failed = SaveState.failed.filter(f => !(f.key === key && f.label === '영업 담당 삭제'));
+      SaveState._set();
+      return err && err.code === '23503' ? 'in-use' : 'check-failed';
+    }
+    EST.sales = EST.sales.filter(s => s.id !== id);
+    return true;
   },
 };
