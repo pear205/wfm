@@ -167,8 +167,9 @@ button{cursor:pointer;border:none;background:none;font-family:inherit}
 .year-table tbody td.col-annual{position:sticky;right:var(--gutter);z-index:5;border-left:none;border-right:1px solid var(--border);border-radius:0 8px 8px 0;vertical-align:middle!important}
 /* 가로 스크롤 시 고정 컬럼 바깥 여백(gutter)을 직사각형 가림막으로 덮음 (box-shadow 는 둥근 모서리를 따라가 틈이 생겨 뒤 셀이 비침) */
 .year-table .col-member::before,.year-table .col-annual::after{content:"";position:absolute;top:-2px;bottom:-2px;width:var(--gutter);background:var(--bg-app);pointer-events:none}
-.year-table .col-member::before{left:calc(var(--gutter) * -1)}
-.year-table .col-annual::after{right:calc(var(--gutter) * -1)}
+/* absolute 는 테두리 안쪽(padding box) 기준이라 컬럼 테두리(1px)만큼 더 밀어야 화면 가장자리까지 덮임 */
+.year-table .col-member::before{left:calc(-1px - var(--gutter))}
+.year-table .col-annual::after{right:calc(-1px - var(--gutter))}
 .annual-cell{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:5px 4px;min-height:36px}
 .annual-spark{display:flex;align-items:flex-end;gap:1px;height:16px}
 .annual-spark-bar{width:4px;border-radius:1px 1px 0 0;flex-shrink:0;min-height:2px}
