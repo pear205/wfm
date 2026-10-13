@@ -476,14 +476,12 @@ function yearWindow(year) {
 }
 const shiftYM = (y, m, d) => ymParts(ymOf(y, m) + d);
 
-function renderYearView() {
-  const { year } = state;
+// 투입 현황의 이름/프로젝트 필터를 통과한 멤버. 화면 표와 PNG 내보내기가 같은 결과를 쓴다.
+function yearVisibleMembers(year) {
   const cols = yearWindow(year);
-  const colCls = c => `${c.pad ? 'is-pad' : ''}${c.m === 1 ? ' yr-start' : ''}`;
-
   const winLo = ymOf(cols[0].y, cols[0].m), winHi = ymOf(cols[cols.length-1].y, cols[cols.length-1].m);
   const inWin = a => { const k = ymOf(a.year, a.month); return k >= winLo && k <= winHi; };
-  const visibleMembers = DATA.members.filter(mem => {
+  return DATA.members.filter(mem => {
     if (state.projectFilter) {
       const hasProj = DATA.assignments.some(a => a.memberId === mem.id && a.projectId === state.projectFilter && inWin(a));
       if (!hasProj) return false;
@@ -497,6 +495,14 @@ function renderYearView() {
       .filter(Boolean);
     return memberProjects.some(pj => pj.name.toLowerCase().includes(q) || (pj.client||'').toLowerCase().includes(q));
   });
+}
+
+function renderYearView() {
+  const { year } = state;
+  const cols = yearWindow(year);
+  const colCls = c => `${c.pad ? 'is-pad' : ''}${c.m === 1 ? ' yr-start' : ''}`;
+
+  const visibleMembers = yearVisibleMembers(year);
   const filtered = visibleMembers.length !== DATA.members.length;
 
   // 팀 합계 행 (thead 첫 번째) — 표에 보이는 멤버(필터 결과) 기준
@@ -2463,7 +2469,7 @@ function _exportPng() {
     : { bg:'#f4f6fc', bgAlt:'#ffffff', bgSurf:'#ffffff', border:'#e0e3ec', text:'#1a1d21', textM:'#6b7280', accent:'#3d6feb' };
 
   const year = state.year;
-  const members = DATA.members.filter(m => { const an = getMemberAnnual(m, year); return an.cap > 0 || an.total > 0; });
+  const members = yearVisibleMembers(year).filter(m => { const an = getMemberAnnual(m, year); return an.cap > 0 || an.total > 0; });
 
   const SC = 2; // scale
   const MH = 20, RH = 36, HH = 28; // month header, row height, header height
