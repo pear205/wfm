@@ -9,26 +9,27 @@
 ## 파일 구조
 ```
 wfm/
-├── index.html   # HTML 뼈대
-├── style.css    # 전체 CSS (상단 주석에 디자인 시스템/토큰 설명)
-├── app.js       # UI 로직 (섹션 구분: COMMON / YEAR VIEW / BENCH VIEW)
-├── ops.js       # 운영 도우미(app.js 다음 로드): 삭제 영향 안내, 재직 밖 투입 정리, KPI→점검 목록, 산정 대비 계획, 탭 복귀 시 다시 읽기, 투입 CSV·전체 백업
-├── wisenm.js    # WiseNTM 공수 산정 + 산정 기록(시안 D). 독립 상태 `_wn`, 순수 계산 `wnCompute`, `wnLeaveGuard`
-├── estimate-admin.js # 관리 드로어 "영업 담당" 탭 (`renderSalesAdminDrawer`)
-├── sql/estimates.sql # 산정 기록 테이블·RLS·가드 트리거(적용 완료)
-├── docs/estimate-spec.md # 산정 기록 명세(데이터 형태·`EstimateAPI` 계약)
-├── board.js     # 게시판 화면 (목록·검색·합계·상세·댓글·글쓰기, CSV)
-├── board-admin.js # 관리 드로어 게시판/템플릿 탭 (템플릿 필드 편집기)
-├── sql/boards.sql # 게시판 테이블 생성 SQL (사용자가 Supabase 에서 직접 실행)
-├── docs/board-spec.md # 게시판 명세(데이터 형태·API 계약)
-└── data.js      # 데이터 레이어 (Supabase CRUD, 조회 상태 `LOAD`, `showToast`, 산정 기록 `EST/ELOAD/EstimateAPI/CURRENT_USER`)
-tests/            # `node --test tests/*.test.js` — vm 으로 전역 스크립트를 로드해 계산(wnCompute, 용량·초과·표시 공수 등) 고정 테스트
+├── public/            # ★ 배포 폴더: GitHub Pages 는 이 폴더만 사이트로 올린다(.github/workflows/pages.yml)
+│   ├── index.html   # HTML 뼈대
+│   ├── style.css    # 전체 CSS (상단 주석에 디자인 시스템/토큰 설명)
+│   ├── app.js       # UI 로직 (섹션 구분: COMMON / YEAR VIEW / BENCH VIEW)
+│   ├── ops.js       # 운영 도우미(app.js 다음 로드): 삭제 영향 안내, 재직 밖 투입 정리, KPI→점검 목록, 산정 대비 계획, 탭 복귀 시 다시 읽기, 투입 CSV·전체 백업
+│   ├── wisenm.js    # WiseNTM 공수 산정 + 산정 기록(시안 D). 독립 상태 `_wn`, 순수 계산 `wnCompute`, `wnLeaveGuard`
+│   ├── estimate-admin.js # 관리 드로어 "영업 담당" 탭 (`renderSalesAdminDrawer`)
+│   ├── board.js     # 게시판 화면 (목록·검색·합계·상세·댓글·글쓰기, CSV)
+│   ├── board-admin.js # 관리 드로어 게시판/템플릿 탭 (템플릿 필드 편집기)
+│   └── data.js      # 데이터 레이어 (Supabase CRUD, 조회 상태 `LOAD`, `showToast`, 산정 기록 `EST/ELOAD/EstimateAPI/CURRENT_USER`)
+├── sql/             # DB 스크립트(사이트에 올라가지 않음): allowlist.sql, boards.sql, estimates.sql
+├── docs/            # 명세(사이트에 올라가지 않음): board-spec.md, estimate-spec.md
+├── tests/           # `node --test tests/*.test.js` — vm 으로 public/ 의 전역 스크립트를 로드해 계산 고정 테스트
+├── .github/workflows/pages.yml # push → public/ 만 Pages 배포
+└── HANDOFF.md, CLAUDE.md       # 작업 기록(사이트에 올라가지 않음)
 ```
 
 ## 로컬 실행 / 배포
-- 정적 서버로 포트 7900에 띄움: `python -m http.server 7900` 또는 `.claude/launch.json` 의 `npx serve -p 7900 -s .`
+- 정적 서버로 포트 7900에 띄움(**public/ 폴더 기준**): `npx serve -p 7900 -s public` (`.claude/launch.json` 에 설정됨) 또는 `python -m http.server 7900 -d public`. `serve -s` 는 없는 경로에도 index.html 을 돌려주므로 파일 존재 확인은 실제 배포 사이트에서 한다.
 - 로그인은 Supabase Auth **Google OAuth 만**(허용 목록 `wfm_allowed_users`, 비밀번호 로그인은 2026-10-09 제거)이며 **키·토큰은 문서·코드·채팅에 남기지 말 것**. 에이전트는 로그인할 수 없으므로, 로컬 검증은 `DATA`/`LOAD` 를 직접 채우고 `render()` 를 호출하는 방식으로 한다.
-- 배포: `master` 푸시 → GitHub Pages(https://pear205.github.io/wfm/) 에 1~2분 뒤 반영. 확인 시 Ctrl+F5(캐시).
+- 배포: `master` 푸시 → GitHub Actions(`.github/workflows/pages.yml`)가 **public/ 폴더만** GitHub Pages(https://pear205.github.io/wfm/)에 올림(1~2분, Actions 탭에서 진행 확인). Pages 설정은 "GitHub Actions" 방식. 확인 시 Ctrl+F5(캐시). 앱 파일(js/css/html)은 반드시 public/ 안에 둔다. 새 파일을 루트에 두면 사이트에 안 올라간다.
 
 ## 핵심 기술 사항
 - `DATA` 객체 (`data.js`): `members`, `projects`, `assignments` 배열, Supabase 영속화 (조회 실패 시 오류 화면+재시도. 샘플/시드 데이터는 코드에 없음 — 모든 데이터는 DB 에서만 옴)

@@ -6,8 +6,8 @@
 ## 시작할 때 / 끝낼 때
 1. **시작**: `git pull` → 이 파일의 "대기 중인 결정"과 "백로그" 확인 → (Claude Code 면 "HANDOFF.md 읽고 이어서 진행해줘")
 2. **끝(푸시할 때마다)**: 이 파일을 먼저 최신화 → 같은 커밋에 포함 → `git push` → 원격과 일치하는지 확인(`git status -sb`). "최신화해줘" 요청 시에는 이 파일과 CLAUDE.md 가 실제 코드/커밋과 맞는지부터 확인.
-3. 배포(GitHub Pages)는 푸시 후 1~2분. 브라우저는 Ctrl+F5.
-4. 로컬 서버: `python -m http.server 7900` (또는 `.claude/launch.json` 의 npx serve). 로그인(Supabase Auth)이 필요하니 비밀번호는 본인이 직접 입력.
+3. 배포(GitHub Pages)는 푸시 후 1~2분(GitHub Actions 가 **public/ 폴더만** 올림). 브라우저는 Ctrl+F5.
+4. 로컬 서버: `npx serve -p 7900 -s public` (또는 `python -m http.server 7900 -d public`, `.claude/launch.json` 에 설정). 로그인(Supabase Auth)이 필요하니 비밀번호는 본인이 직접 입력.
 
 ## 현재 상태 (2026-10-14)
 - 2026-10-14: 운영 도우미(ops.js) 추가 — 삭제 전 영향 안내, 입사/퇴사 월 변경 시 재직 밖 투입 정리, KPI 카드(팀 총량 초과 월·개인 초과 투입) 누르면 점검 목록, 프로젝트 패널에 연결된 산정 대비 투입 계획, 탭을 1분 넘게 떠났다 오면 다른 PC 변경 자동 반영, 내보내기에 투입 CSV·전체 백업(JSON). 계산 고정 테스트 `tests/`.
@@ -112,6 +112,7 @@
 - 확인 필요(미수정): `board.js` 댓글/글 삭제 실패 처리, `data.js addMember` 의 `'m'+Date.now()` id, 남은 CSS 공통화 후보(빈 상태 박스·오류/필수 문구·체크박스 라벨·표, `estAdminStyle` 이전, `!important` 정리 — 시각 비교 필요해 보류)
 
 ## 작업 이력 (최근 → 과거, 2026-10-07 세션 위주)
+- (2026-10-14) **배포 폴더 분리**: 앱 파일 9개를 `public/` 로 이동(`git mv`), Pages 를 "GitHub Actions" 방식으로 전환(`.github/workflows/pages.yml`, public/ 만 업로드) → HANDOFF/CLAUDE/sql/docs/tests 가 공개 사이트에서 빠짐. 단 **저장소 자체는 아직 PUBLIC** 이라 GitHub 에서는 그대로 보임. 남은 보안 조치: 현재 파일의 이메일·내부 정보 정리, git 이력(첫 커밋의 실제 팀원·고객사 이름) 제거(새 저장소 방식 검토, 사용자 승인 필요), 기준표·코드 DB 이전.
 - (2026-10-14) 영업 담당에 **직급**(`role`) 추가 — DB `wfm_sales_people.role text not null default ''` 를 Supabase(common)에 적용(기존 3명은 빈 값, 관리 > 영업 담당에서 입력), 관리 탭 목록·편집 모달, 산정 화면 영업 선택 목록("이름 직급 (소속)"), `sql/estimates.sql`·`docs/estimate-spec.md` 반영. 참고: 실제 DB 에 영업 담당 3명이 이미 등록돼 있음 → 실제 로그인에서 영업 담당 추가는 동작 확인됨.
 - (2026-10-14) **운영 도우미 `ops.js`** + 계산 테스트 75개(`tests/`, vm 로더). `data.js` 에 `fetchData()` 분리(백그라운드 새로 고침 실패 시 화면 유지). 공수 산정 스냅샷의 직접 입력값(custom)은 0 이상 숫자만 남기도록 정규화. 브라우저 기능 시나리오(점검 목록·삭제 경고·재직 밖 삭제·산정 비교 XSS·CSV BOM·백업 부분 실패·새로 고침 경합/실패) + Playwright 스크린샷(라이트/다크) + 읽기 전용 리뷰(지적 반영: 새로 고침 변경 감지를 키 정렬 비교로, 다른 화면이 로딩 중일 때 산정 패널 갱신, 산정 열기 시 미저장 확인, 색 값 #hex 만 허용, 재직 밖 현장수당 함께 해제, 백업은 한 번 더 눌러 받기, 프로젝트 삭제 시 로컬 산정 연결 해제). `confirmable` 이 확인 후 글자를 무조건 "삭제"로 바꾸던 것을 원래 글자로 복원하게 수정.
 - (2026-10-13) PNG 내보내기가 화면 필터(이름/프로젝트)를 따르도록 수정(사용자 확인: 의도 아님) — 필터 계산을 `yearVisibleMembers(year)` 로 공통화해 표·PNG 가 같은 함수 사용.

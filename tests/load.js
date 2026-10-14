@@ -4,7 +4,7 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const ROOT = path.resolve(__dirname, '..');
+const ROOT = path.resolve(__dirname, '..', 'public');   // 앱 파일(배포 폴더)
 
 // 어떤 속성 접근/호출/대입도 흡수하는 더미 DOM 요소
 function dummy() {
