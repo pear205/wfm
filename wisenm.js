@@ -1164,7 +1164,7 @@ function _wnRestore(id, n) {
 function _wnSalesOptions(cur) {
   const all = _wnSales();
   const act = all.filter(s => s.active !== false).sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || String(a.name).localeCompare(String(b.name), 'ko'));
-  let html = `<option value="">선택 안 함</option>` + act.map(s => `<option value="${_wnE(s.id)}"${s.id === cur ? ' selected' : ''}>${_wnE(s.name)}${s.dept ? ` (${_wnE(s.dept)})` : ''}</option>`).join('');
+  let html = `<option value="">선택 안 함</option>` + act.map(s => `<option value="${_wnE(s.id)}"${s.id === cur ? ' selected' : ''}>${_wnE(s.name)}${s.role ? ` ${_wnE(s.role)}` : ''}${s.dept ? ` (${_wnE(s.dept)})` : ''}</option>`).join('');
   let missing = false;
   if (cur && !act.some(s => s.id === cur)) {
     const s = all.find(x => x.id === cur);

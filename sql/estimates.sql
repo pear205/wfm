@@ -14,11 +14,15 @@ end $$;
 create table if not exists public.wfm_sales_people (
   id text primary key,
   name text not null,
+  role text not null default '',     -- 직급(2026-10-14 추가)
   dept text not null default '',
   active boolean not null default true,
   sort_order integer not null default 0,
   created_at timestamptz not null default now()
 );
+
+-- 이미 만들어진 DB 용(직급 컬럼 추가, 2026-10-14)
+alter table public.wfm_sales_people add column if not exists role text not null default '';
 
 create table if not exists public.wfm_estimates (
   id text primary key,

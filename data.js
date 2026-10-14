@@ -594,10 +594,10 @@ const EST   = { sales: [], estimates: [], versions: {} };
 const ELOAD = { status: 'idle', errors: [] };
 
 function _rowToSales(r) {
-  return { id: r.id, name: r.name, dept: r.dept || '', active: r.active !== false, sortOrder: r.sort_order ?? 0, createdAt: r.created_at || '' };
+  return { id: r.id, name: r.name, role: r.role || '', dept: r.dept || '', active: r.active !== false, sortOrder: r.sort_order ?? 0, createdAt: r.created_at || '' };
 }
 function _salesToRow(s) {
-  return { id: s.id, name: s.name, dept: s.dept || '', active: s.active !== false, sort_order: s.sortOrder ?? 0 };
+  return { id: s.id, name: s.name, role: s.role || '', dept: s.dept || '', active: s.active !== false, sort_order: s.sortOrder ?? 0 };
 }
 function _rowToEstimate(r) {
   return { id: r.id, title: r.title || '', client: r.client || '', salesId: r.sales_id || null, projectId: r.project_id || null,
@@ -883,12 +883,12 @@ const EstimateAPI = {
   },
 
   /* ── 영업 담당 ── */
-  saveSales({ id, name, dept, active }) {
+  saveSales({ id, name, role, dept, active }) {
     const i = id ? EST.sales.findIndex(s => s.id === id) : -1;
     let s;
-    if (i >= 0) s = EST.sales[i] = { ...EST.sales[i], name, dept: dept || '', active: active !== false };
+    if (i >= 0) s = EST.sales[i] = { ...EST.sales[i], name, role: role || '', dept: dept || '', active: active !== false };
     else {
-      s = { id: id || _bid('sal_'), name, dept: dept || '', active: active !== false,
+      s = { id: id || _bid('sal_'), name, role: role || '', dept: dept || '', active: active !== false,
             sortOrder: EST.sales.reduce((m, x) => Math.max(m, x.sortOrder), -1) + 1, createdAt: new Date().toISOString() };
       EST.sales.push(s);
     }

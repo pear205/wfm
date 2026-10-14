@@ -5,7 +5,7 @@
 // 의존(app.js): esc, showToast, confirmable, Modal, state, renderDrawerContent
 // 스타일은 JS 가 <style id="estAdminStyle"> 로 주입한다 (접두어 .eadm-, CSS 변수만 사용)
 
-let _eadmCtx = null;   // 열려 있는 편집 모달 상태 { id|null, name, dept, active }
+let _eadmCtx = null;   // 열려 있는 편집 모달 상태 { id|null, name, role, dept, active }
 
 // ─── 공통 헬퍼 ───
 const _eadmReady = () => typeof EST !== 'undefined' && typeof ELOAD !== 'undefined' && typeof EstimateAPI !== 'undefined';
@@ -44,7 +44,7 @@ function _eadmInjectStyle() {
   st.id = 'estAdminStyle';
   st.textContent = `
 .eadm-item .mgmt-item-name{white-space:normal;word-break:break-word}
-.eadm-dept{color:var(--text-m)}
+.eadm-dept,.eadm-role{color:var(--text-m)}
 .eadm-form-hint{margin:4px 0 0;font-size:12px;color:var(--text-m);line-height:1.5}
 .eadm-form-hint.is-warn{color:var(--text-s)}
 .eadm-check input{width:16px;height:16px;accent-color:var(--accent)}
@@ -106,7 +106,7 @@ function renderSalesAdminDrawer(body) {
   const prev = _eadmCaptureFocus(body);
   const items = _eadmSorted().map(s => {
     const used = _eadmUsed(s.id);
-    const sub = `${s.dept ? `<span class="eadm-dept">${esc(s.dept)}</span>` : '<span class="eadm-dept">소속 없음</span>'} · 사용 기록 ${used}건`;
+    const sub = `${s.role ? `<span class="eadm-role">${esc(s.role)}</span> · ` : ''}${s.dept ? `<span class="eadm-dept">${esc(s.dept)}</span>` : '<span class="eadm-dept">소속 없음</span>'} · 사용 기록 ${used}건`;
     return `<div class="mgmt-item badm-item eadm-item${s.active ? '' : ' is-off'}">
       <div class="mgmt-item-info">
         <div class="mgmt-item-name">${esc(s.name)}${s.active ? '' : ' <span class="badm-off">비활성</span>'}</div>
@@ -160,6 +160,8 @@ function openSalesEditor(id) {
     <div class="form-group"><label class="form-label" for="eadmName">이름 <span aria-hidden="true">*</span></label>
       <input class="form-input" id="eadmName" maxlength="40" required aria-required="true" aria-describedby="eadmNameHint" value="${esc(s ? s.name : '')}" autocomplete="off">
       <p class="eadm-form-hint is-warn" id="eadmNameHint" role="status" aria-live="polite"></p></div>
+    <div class="form-group"><label class="form-label" for="eadmRole">직급</label>
+      <input class="form-input" id="eadmRole" maxlength="40" value="${esc(s ? s.role || '' : '')}" placeholder="예: 부장" autocomplete="off"></div>
     <div class="form-group"><label class="form-label" for="eadmDept">소속</label>
       <input class="form-input" id="eadmDept" maxlength="40" value="${esc(s ? s.dept || '' : '')}" placeholder="예: 영업1팀" autocomplete="off"></div>
     <label class="eadm-check"><input type="checkbox" id="eadmActive" ${s ? (s.active ? 'checked' : '') : 'checked'}> 활성 (산정 기록에서 선택 가능)</label>`;
@@ -195,12 +197,13 @@ async function _eadmSave() {
   const nameEl = document.getElementById('eadmName');
   const name = nameEl.value.trim();
   if (!name) { showToast('이름을 입력하세요.'); nameEl.focus(); return; }
+  const role = document.getElementById('eadmRole').value.trim();
   const dept = document.getElementById('eadmDept').value.trim();
   const active = document.getElementById('eadmActive').checked;
   const dup = _eadmDuplicate(name);
   const btn = document.getElementById('eadmSave'), label = btn.textContent;
   btn.disabled = true; btn.textContent = '저장 중…';
-  try { await EstimateAPI.saveSales({ id: c.id || undefined, name, dept, active }); }
+  try { await EstimateAPI.saveSales({ id: c.id || undefined, name, role, dept, active }); }
   catch (e) { console.error(e); showToast('영업 담당을 저장하지 못했습니다.'); return; }   // 입력을 보존하려고 모달 유지
   finally { btn.disabled = false; btn.textContent = label; }
   if (_eadmCtx !== c) { _eadmRefresh(); return; }                      // 대기 중 모달이 닫혔으면 목록만 갱신

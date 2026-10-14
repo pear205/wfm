@@ -13,7 +13,7 @@
 - 버전마다 **기준표 스냅샷**을 저장해, 나중에 기준표가 바뀌어도 과거 기록은 그때 기준으로 본다.
 
 ## DB (sql/estimates.sql — 이미 적용됨)
-- `wfm_sales_people(id, name, dept, active, sort_order, created_at)`
+- `wfm_sales_people(id, name, role(직급), dept, active, sort_order, created_at)`
 - `wfm_estimates(id, title, client, sales_id→sales(restrict), project_id→projects(set null), estimated_on date, participants jsonb, memo, current_version, total_mm, created_at, updated_at, created_by uuid default auth.uid(), created_by_email default jwt email)`
 - `wfm_estimate_versions(estimate_id→estimates(cascade), version, reason, snapshot jsonb, total_mm, saved_at, saved_by_email)` PK(estimate_id, version)
 - RLS: 전부 `wfm_is_allowed()`. estimates 삭제는 `created_by = auth.uid()` 만. versions 는 select/insert 만(수정·삭제 불가).
@@ -25,7 +25,7 @@ const CURRENT_USER = { id, email }            // app.js _checkAuth 가 채움 (�
 const EST   = { sales: [], estimates: [], versions: {} }   // versions[estimateId] = EstimateVersion[] (열 때 로드·캐시)
 const ELOAD = { status: 'idle'|'loading'|'ok'|'missing'|'error', errors: [] }
 ```
-- SalesPerson: `{ id, name, dept, active, sortOrder, createdAt }`
+- SalesPerson: `{ id, name, role, dept, active, sortOrder, createdAt }`
 - Estimate(머리말): `{ id, title, client, salesId|null, projectId|null, estimatedOn:'YYYY-MM-DD', participants:[{memberId?, name, role}], memo, currentVersion, totalMm, createdAt, updatedAt, createdBy, createdByEmail }`
 - EstimateVersion: `{ estimateId, version, reason, snapshot, totalMm, savedAt, savedByEmail }`
 - **snapshot** = `{ header:{title,client,salesId,salesName,projectId,estimatedOn,participants,memo}, basis:{roles:[...],vars:[...]}, inputs:{dur,custom,roleChecked,vars,varChecked,siItems,siOverride} }`
@@ -44,7 +44,7 @@ const ELOAD = { status: 'idle'|'loading'|'ok'|'missing'|'error', errors: [] }
 | `EstimateAPI.copy(id)` | `Promise<Estimate>` | 최신 버전 snapshot 으로 새 기록(v1, 사유 "복제: <원본 건명>", 건명 "<원본> (복사)") |
 | `EstimateAPI.remove(id)` | `Promise<true\|'not-owner'\|'error'>` | `canDelete` 가 아니면 `'not-owner'`. 서버 삭제 실패(RLS)는 로컬 복구 후 `'error'` |
 | `EstimateAPI.canDelete(est)` | `boolean` | `est.createdBy && est.createdBy === CURRENT_USER.id` |
-| `EstimateAPI.saveSales({id?,name,dept,active})` | `SalesPerson` | 이름 비면 throw 하지 말고 호출 전 UI 에서 검증. id 없으면 `_bid('sal_')` |
+| `EstimateAPI.saveSales({id?,name,role,dept,active})` | `SalesPerson` | 이름 비면 throw 하지 말고 호출 전 UI 에서 검증. id 없으면 `_bid('sal_')` |
 | `EstimateAPI.setSalesActive(id, active)` | `void` | |
 | `EstimateAPI.removeSales(id)` | `Promise<true\|'in-use'\|'check-failed'>` | 로컬·서버(estimates.sales_id 개수)에서 쓰이면 `'in-use'`. FK restrict 가 최종 방어 |
 | `salesName(id)` | `string` | 없으면 `''` |
