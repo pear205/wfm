@@ -3,7 +3,11 @@
 // ██████████████████████████████████████████████████████████
 
 // ─── XSS escape helper ───
-function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+// style 속성에 넣는 색은 #hex 만 허용한다(esc 는 CSS 구문 ; url( 을 막지 못함). 형식이 아니면 중립 회색
+function safeColor(c){ return /^#[0-9a-f]{3,8}$/i.test(String(c ?? '')) ? c : '#8A8D9F'; }
+// 클래스 이름에 넣는 프로젝트 상태는 허용 목록만
+function safeStatus(s){ return ['active','done','planned'].includes(s) ? s : ''; }
 
 // ─── 막대/멤버 이름 키보드 조작 ───
 // Enter·Space = 클릭 · 막대: Delete = 삭제(확인 상태에서 Enter/Delete = 확정, Esc = 취소) · 방향키 = 이웃 막대로 이동
@@ -562,13 +566,13 @@ function renderYearView() {
 
   visibleMembers.forEach(mem => {
     html += `<tr><td class="col-member">
-      <div class="member-cell" data-member="${mem.id}">
-        <div class="member-avatar" style="background:${mem.color}">${esc(initials(mem.name))}</div>
+      <div class="member-cell" data-member="${esc(mem.id)}">
+        <div class="member-avatar" style="background:${safeColor(mem.color)}">${esc(initials(mem.name))}</div>
         <div class="member-info" role="button" tabindex="0" aria-label="${esc(mem.name)} 상세 보기">
           <div class="member-name">${esc(mem.name)}</div>
           <div class="member-role">${esc(mem.role)}</div>
         </div>
-        <button class="bulk-open-btn" data-bulk="${mem.id}" title="일괄 공수 입력">+ 일괄</button>
+        <button class="bulk-open-btn" data-bulk="${esc(mem.id)}" title="일괄 공수 입력">+ 일괄</button>
       </div></td>`;
 
     // Greedy lane assignment: 겹치는 프로젝트만 다른 lane, 순차적인건 같은 lane
@@ -595,7 +599,7 @@ function renderYearView() {
       const tCol = total>1.05?'#E85C4A':total>=1.0?'#4DB36A':total>0?'var(--accent)':'';
       const utilAttr = total>1.05?'over':total<0.98&&total>0?'under':total>=0.98?'ok':'empty';
       const offDuty = !memberActive(mem, cy, m) && total === 0;
-      html += `<td class="assign-cell ${cellCls} ${colCls(c)} ${isCur?'today-col':''}${offDuty?' is-inactive':''}" data-member="${mem.id}" data-month="${m}" data-year="${cy}" data-util="${offDuty?'off':utilAttr}"${offDuty?' title="재직 기간 밖"':''}>`;
+      html += `<td class="assign-cell ${cellCls} ${colCls(c)} ${isCur?'today-col':''}${offDuty?' is-inactive':''}" data-member="${esc(mem.id)}" data-month="${m}" data-year="${cy}" data-util="${offDuty?'off':utilAttr}"${offDuty?' title="재직 기간 밖"':''}>`;
       html += `<div class="assign-bars">`;
       { const tRL=ci===0?4:0, tRR=ci===cols.length-1?4:0;
         const tBg = total>1.05 ? 'rgba(198,40,40,.75)' : 'transparent';
@@ -621,7 +625,7 @@ function renderYearView() {
         const _titleMM = state.assignMode==='both'
           ? `계획 ${_mp.toFixed(2)} / 실제 ${_ma.toFixed(2)} M/M`
           : `${(state.assignMode==='plan'?_mp:(_ma||_mp)).toFixed(2)} M/M`;
-        const _barAttrs = `data-project="${pj.id}" data-assign='${assignKey}' title="${esc(pj.name)} · ${_titleMM} · ${esc(a.type)} — 클릭하여 공수 수정" data-member="${mem.id}" role="button" tabindex="-1" aria-label="${esc(pj.name)} ${cy}년 ${m}월 ${_titleMM} 수정 (Enter: 수정, Delete: 삭제)"`;
+        const _barAttrs = `data-project="${esc(pj.id)}" data-assign="${esc(assignKey)}" title="${esc(pj.name)} · ${_titleMM} · ${esc(a.type)} — 클릭하여 공수 수정" data-member="${esc(mem.id)}" role="button" tabindex="-1" aria-label="${esc(pj.name)} ${cy}년 ${m}월 ${_titleMM} 수정 (Enter: 수정, Delete: 삭제)"`;
         const _biju = a.type==='비상주'?'biju':'';
 
         if (state.assignMode === 'both') {
@@ -666,7 +670,7 @@ function renderYearView() {
               ${mmSub ? `<span style="font-size:8px;color:rgba(255,255,255,.55);flex-shrink:0">${mmSub}</span>` : ''}
             </div>
             ${(unplanned||actOver) ? `<span class="pb-status-badge" style="background:${actOver?'#EF4444':'#EF4444'}">${actOver?'↑':'!'}</span>` : ''}
-            <span class="proj-bar-del" data-del-assign='${assignKey}' title="공수 삭제">✕</span>
+            <span class="proj-bar-del" data-del-assign="${esc(assignKey)}" title="공수 삭제">✕</span>
           </div>`;
         } else {
           let _barBg, _mmDisp;
@@ -680,7 +684,7 @@ function renderYearView() {
             ${_barAttrs}>
             ${isFirst ? `<span class="proj-bar-name">${esc(pj.name)}</span>` : ''}
             <span class="proj-bar-mm" style="font-size:10px${!isFirst?';flex:1;text-align:center':''}">${_mmDisp}</span>
-            <span class="proj-bar-del" data-del-assign='${assignKey}' title="공수 삭제">✕</span>
+            <span class="proj-bar-del" data-del-assign="${esc(assignKey)}" title="공수 삭제">✕</span>
           </div>`;
         }
       }
@@ -715,7 +719,7 @@ function renderYearView() {
       for (const c of cols) {
         const isCur = c.y===CUR_YEAR && c.m===CUR_MONTH;
         const hasAl = DataAPI.hasAllowance(mem.id, c.y, c.m);
-        html += `<td class="col-month allow-cell ${colCls(c)} ${hasAl?'allow-on':''} ${isCur?'today-col':''}" data-allow-member="${mem.id}" data-allow-month="${c.m}" data-allow-year="${c.y}">${hasAl?'<span class="allow-dot"></span>':''}</td>`;
+        html += `<td class="col-month allow-cell ${colCls(c)} ${hasAl?'allow-on':''} ${isCur?'today-col':''}" data-allow-member="${esc(mem.id)}" data-allow-month="${c.m}" data-allow-year="${c.y}">${hasAl?'<span class="allow-dot"></span>':''}</td>`;
       }
       html += `<td class="col-annual"></td></tr>`;
     }
@@ -826,7 +830,7 @@ function renderBenchView() {
           ${availItems.length ? availItems.map(d => {
             const pct = Math.min(100, d.avail*100);
             return `<div class="bench-avail-item">
-              <div class="member-avatar" style="background:${d.mem.color};width:22px;height:22px;min-width:22px;font-size:8px;border-radius:6px">${esc(initials(d.mem.name))}</div>
+              <div class="member-avatar" style="background:${safeColor(d.mem.color)};width:22px;height:22px;min-width:22px;font-size:8px;border-radius:6px">${esc(initials(d.mem.name))}</div>
               <div class="bench-avail-name">${esc(d.mem.name)}</div>
               <div class="bench-avail-bar-wrap"><div class="bench-avail-bar-fill" style="width:${pct}%;background:var(--accent)"></div></div>
               <div class="bench-avail-mm">+${fmtMM(d.avail)}</div>
@@ -871,8 +875,8 @@ function renderBenchView() {
     html += `<tr><td colspan="13" style="padding:40px;text-align:center;color:var(--text-m);font-size:13px">검색 결과가 없습니다.</td></tr>`;
   }
   filteredMemberRows.forEach(({mem, monthly}) => {
-    html += `<tr><td class="col-member"><div class="member-cell" data-member="${mem.id}">
-      <div class="member-avatar" style="background:${mem.color}">${esc(initials(mem.name))}</div>
+    html += `<tr><td class="col-member"><div class="member-cell" data-member="${esc(mem.id)}">
+      <div class="member-avatar" style="background:${safeColor(mem.color)}">${esc(initials(mem.name))}</div>
       <div class="member-info" role="button" tabindex="0" aria-label="${esc(mem.name)} 상세 보기"><div class="member-name">${esc(mem.name)}</div><div class="member-role">${esc(mem.role)}</div></div>
     </div></td>`;
     monthly.forEach((d,i) => {
@@ -928,7 +932,7 @@ function renderProjectPanel(projectId) {
     if (!mem) return;
     const mm = yearAs.filter(a=>a.memberId===mid).reduce((s,a)=>s+getDisplayMM(a),0);
     chips += `<div class="pj-chip" style="cursor:pointer" data-edit-assign="${mid}" data-assign-project="${projectId}" title="공수 수정">
-      <div class="chip-av" style="background:${mem.color}">${esc(initials(mem.name))}</div>
+      <div class="chip-av" style="background:${safeColor(mem.color)}">${esc(initials(mem.name))}</div>
       <span>${esc(mem.name)}</span>
       <span class="chip-mm">${mm.toFixed(1)}M</span>
       <span style="font-size:10px;opacity:.5;margin-left:1px">✏</span>
@@ -937,14 +941,14 @@ function renderProjectPanel(projectId) {
 
   document.getElementById('projectPanelContent').innerHTML = `
     <div class="pj-header">
-      <div class="pj-dot" style="background:${pj.color}"></div>
+      <div class="pj-dot" style="background:${safeColor(pj.color)}"></div>
       <div style="flex:1">
         <div class="pj-name">${esc(pj.name)}</div>
         <div class="pj-client">${esc(pj.client)}</div>
       </div>
-      <span class="pj-status ${pj.status}">${STATUS_KR[pj.status]||esc(pj.status)}</span>
-      <button class="panel-edit-btn" data-edit-project="${pj.id}">✏ 수정</button>
-      <button class="panel-assign-btn" data-assign-project="${pj.id}">+ 멤버 투입</button>
+      <span class="pj-status ${safeStatus(pj.status)}">${STATUS_KR[pj.status]||esc(pj.status)}</span>
+      <button class="panel-edit-btn" data-edit-project="${esc(pj.id)}">✏ 수정</button>
+      <button class="panel-assign-btn" data-assign-project="${esc(pj.id)}">+ 멤버 투입</button>
     </div>
     <div class="pj-meta">
       <div class="pj-meta-item"><span class="pj-meta-label">기간</span><span class="pj-meta-value">${esc(pj.start)} ~ ${esc(pj.end)}</span></div>
@@ -976,7 +980,7 @@ function renderMemberPanel(memberId) {
     if (!pj) return;
     const mm = DATA.assignments.filter(a=>a.memberId===memberId&&a.projectId===pid&&a.year===state.year).reduce((s,a)=>s+getDisplayMM(a),0);
     projList += `<div class="proj-row-sm" data-project="${pid}">
-      <div class="mmc-proj-dot" style="width:8px;height:8px;border-radius:50%;background:${pj.color}"></div>
+      <div class="mmc-proj-dot" style="width:8px;height:8px;border-radius:50%;background:${safeColor(pj.color)}"></div>
       <span style="font-size:13px;font-weight:500;flex:1">${esc(pj.name)}</span>
       <span style="font-size:11px;color:var(--text-m)">${esc(pj.client)}</span>
       <span style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600">${mm.toFixed(1)}M</span>
@@ -985,9 +989,9 @@ function renderMemberPanel(memberId) {
 
   document.getElementById('memberPanelContent').innerHTML = `
     <div class="mp-header">
-      <div class="mp-avatar-lg" style="background:${mem.color}">${esc(initials(mem.name))}</div>
+      <div class="mp-avatar-lg" style="background:${safeColor(mem.color)}">${esc(initials(mem.name))}</div>
       <div style="flex:1"><div class="mp-name">${esc(mem.name)}</div><div class="mp-role">${esc(mem.role)}</div></div>
-      <button class="panel-edit-btn" data-edit-member="${mem.id}">✏ 수정</button>
+      <button class="panel-edit-btn" data-edit-member="${esc(mem.id)}">✏ 수정</button>
     </div>
     <div class="mp-stats">
       <div class="stat-card"><div class="stat-label">${state.year}년 총 M/M</div>
@@ -1129,16 +1133,16 @@ function renderDrawerContent() {
 
   } else if (tab === 'members') {
     let items = DATA.members.map(mem => `
-      <div class="mgmt-item" draggable="true" data-drag-id="${mem.id}">
+      <div class="mgmt-item" draggable="true" data-drag-id="${esc(mem.id)}">
         <span class="drag-handle" title="순서 변경">⠿</span>
-        <div class="member-avatar" style="background:${mem.color};width:32px;height:32px;font-size:10px;flex-shrink:0">${esc(initials(mem.name))}</div>
+        <div class="member-avatar" style="background:${safeColor(mem.color)};width:32px;height:32px;font-size:10px;flex-shrink:0">${esc(initials(mem.name))}</div>
         <div class="mgmt-item-info">
           <div class="mgmt-item-name">${esc(mem.name)}</div>
           <div class="mgmt-item-sub">${esc(mem.role)}</div>
         </div>
         <div class="mgmt-actions">
-          <button class="btn-icon-sm" data-edit-member="${mem.id}" title="수정">✏</button>
-          <button class="btn-icon-sm danger" data-del-member="${mem.id}" title="삭제">✕</button>
+          <button class="btn-icon-sm" data-edit-member="${esc(mem.id)}" title="수정">✏</button>
+          <button class="btn-icon-sm danger" data-del-member="${esc(mem.id)}" title="삭제">✕</button>
         </div>
       </div>`).join('');
     body.innerHTML = `<button class="mgmt-add-btn is-top" id="addMemberBtn">+ 멤버 추가</button>
@@ -1149,16 +1153,16 @@ function renderDrawerContent() {
   } else {
     let items = DATA.projects.map(pj => {
       const s = STATUS_KR[pj.status]||esc(pj.status);
-      return `<div class="mgmt-item" draggable="true" data-drag-id="${pj.id}">
+      return `<div class="mgmt-item" draggable="true" data-drag-id="${esc(pj.id)}">
         <span class="drag-handle" title="순서 변경">⠿</span>
-        <div style="width:10px;height:10px;border-radius:50%;background:${pj.color};flex-shrink:0;margin-top:2px"></div>
+        <div style="width:10px;height:10px;border-radius:50%;background:${safeColor(pj.color)};flex-shrink:0;margin-top:2px"></div>
         <div class="mgmt-item-info">
           <div class="mgmt-item-name">${esc(pj.name)}</div>
           <div class="mgmt-item-sub">${esc(pj.client)} · ${s} · ${esc(pj.start)}~${esc(pj.end)}</div>
         </div>
         <div class="mgmt-actions">
-          <button class="btn-icon-sm" data-edit-project="${pj.id}" title="수정">✏</button>
-          <button class="btn-icon-sm danger" data-del-project="${pj.id}" title="삭제">✕</button>
+          <button class="btn-icon-sm" data-edit-project="${esc(pj.id)}" title="수정">✏</button>
+          <button class="btn-icon-sm danger" data-del-project="${esc(pj.id)}" title="삭제">✕</button>
         </div>
       </div>`;}).join('');
     body.innerHTML = `<button class="mgmt-add-btn is-top" id="addProjectBtn">+ 프로젝트 추가</button>
@@ -1596,7 +1600,7 @@ function openMemberAssignForm(projectId, memberId, focusYm) {
   _maForm.actStart = null; _maForm.actEnd = null; _maForm.gaps = new Set();
 
   const memberOpts = DATA.members.map(m =>
-    `<option value="${m.id}">${esc(m.name)} (${esc(m.role)})</option>`).join('');
+    `<option value="${esc(m.id)}">${esc(m.name)} (${esc(m.role)})</option>`).join('');
   document.getElementById('formContent').innerHTML = `
     <div class="form-row">
       <div class="form-group" style="flex:1">
