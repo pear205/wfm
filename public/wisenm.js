@@ -39,23 +39,62 @@ const WN_VAR_COLOR  = '#8A8D9F';
 const WN_LIMITS = { title:100, client:100, ptName:40, ptRole:40, memo:2000, reason:200 };
 
 // ─── 기본값 / 정규화 (스냅샷 복원에도 사용) ───
-function _wnDefaultBasis() { return { roles: _deepCopy(WISENM_ROLES), vars: _deepCopy(WISENM_VARS) }; }
-function _wnDefaultInputs() {
+// DB 기준표(BasisAPI, 계약: docs/admin-spec.md). 없거나 내장(source 'builtin')이면 null → 내장 상수 그대로(지금과 동일)
+function _wnDbBasis() {
+  try {
+    if (typeof BasisAPI === 'undefined' || !BasisAPI || typeof BasisAPI.current !== 'function') return null;
+    const c = BasisAPI.current();
+    return c && c.source !== 'builtin' && c.content && typeof c.content === 'object' ? c : null;
+  } catch (e) { return null; }
+}
+// 새 산정에 적용한 기준표 출처(저장 스냅샷 basisRef). 내장은 {id:null, version:0}
+function _wnCurrentRef() {
+  const c = _wnDbBasis();
+  return c ? { id: c.id == null ? null : String(c.id), version: Number(c.version) || 0 } : { id: null, version: 0 };
+}
+function _wnNormalizeRef(r) {
+  return r && typeof r === 'object' ? { id: r.id == null ? null : String(r.id), version: Number(r.version) || 0 } : { id: null, version: 0 };
+}
+function _wnBuiltinBasis() { return { roles: _deepCopy(WISENM_ROLES), vars: _deepCopy(WISENM_VARS) }; }
+// 새 산정용 기준: DB 기준표의 사용 중 역할·변수. 내용이 비정상이면 내장으로 폴백(inTotal 은 아직 읽지 않음)
+function _wnDefaultBasis() {
+  const c = _wnDbBasis(), ct = c && c.content;
+  if (!ct || !Array.isArray(ct.roles) || !Array.isArray(ct.vars)) return _wnBuiltinBasis();
+  const roles = ct.roles.filter(r => r && r.id != null && r.active !== false)
+    .map(r => ({ id:String(r.id), cat:String(r.cat ?? ''), name:String(r.name ?? ''), base:Number(r.base) || 0, scale:r.scale, note:String(r.note ?? '') }));
+  const vars = ct.vars.filter(v => v && v.id != null).map(v => {
+    const o = { id:String(v.id), name:String(v.name ?? ''), unit:String(v.unit ?? ''), placeholder:String(v.placeholder ?? ''), note:String(v.note ?? '') };
+    if (v.scale) o.scale = String(v.scale);
+    return o;
+  });
+  return roles.length && vars.length ? { roles, vars } : _wnBuiltinBasis();
+}
+function _wnCatColor(cat) {
+  const ct = (_wnDbBasis() || {}).content, hit = ct && Array.isArray(ct.categories) ? ct.categories.find(x => x && x.name === cat) : null;
+  return hit && /^#[0-9a-f]{3,8}$/i.test(String(hit.color)) ? hit.color : (WN_CAT_COLORS[cat] || WN_VAR_COLOR);
+}
+// builtin=true: 내장 SI 기본 항목(저장본 정규화용). 아니면 DB siPresets 가 있을 때 그것
+function _wnDefaultInputs(builtin) {
+  const ct = builtin ? null : (_wnDbBasis() || {}).content;
+  const presets = ct && Array.isArray(ct.siPresets) && ct.siPresets.length
+    ? ct.siPresets.filter(p => p && p.id != null).map(p => ({ id:String(p.id), name:String(p.name ?? ''), mm:Number(p.mm) || 0, checked:false })) : null;
+  const siItems = presets && presets.length ? presets : [
+    { id:'si_1', name:'데이터 마이그레이션',    mm:1.0, checked:false },
+    { id:'si_2', name:'CRM / 콜센터 연동',      mm:2.0, checked:false },
+    { id:'si_3', name:'업무 특화 기능 개발',     mm:1.5, checked:false },
+    { id:'si_4', name:'보고서 커스터마이징',     mm:0.5, checked:false },
+    { id:'si_5', name:'기존 시스템 인터페이스',  mm:1.0, checked:false },
+  ];
+  const nextN = siItems.reduce((m, i) => { const n = Number(String(i.id).replace(/^si_/, '')); return Number.isFinite(n) ? Math.max(m, n + 1) : m; }, 6);
   return {
     dur: 2,
     custom: {},
     vars: {},
     roleChecked: {},  // key: roleId, undefined/true = 포함, false = 제외
     varChecked: {},   // key: varId, true = 포함, undefined/false = 제외
-    siItems: [
-      { id:'si_1', name:'데이터 마이그레이션',    mm:1.0, checked:false },
-      { id:'si_2', name:'CRM / 콜센터 연동',      mm:2.0, checked:false },
-      { id:'si_3', name:'업무 특화 기능 개발',     mm:1.5, checked:false },
-      { id:'si_4', name:'보고서 커스터마이징',     mm:0.5, checked:false },
-      { id:'si_5', name:'기존 시스템 인터페이스',  mm:1.0, checked:false },
-    ],
+    siItems,
     siOverride: '',
-    _siNext: 6,
+    _siNext: nextN,
   };
 }
 function _wnTodayStr() {
@@ -66,7 +105,7 @@ function _wnDefaultHeader() {
   return { title:'', client:'', salesId:null, projectId:null, estimatedOn:_wnTodayStr(), participants:[], memo:'' };
 }
 function _wnNormalizeBasis(b) {
-  const d = _wnDefaultBasis();
+  const d = _wnBuiltinBasis();   // 저장본 복원: 비어 있으면 내장(DB 기준표는 새 산정에만)
   if (!b || typeof b !== 'object') return d;
   return {
     roles: Array.isArray(b.roles) && b.roles.length ? _deepCopy(b.roles) : d.roles,
@@ -74,7 +113,7 @@ function _wnNormalizeBasis(b) {
   };
 }
 function _wnNormalizeInputs(src) {
-  const d = _wnDefaultInputs(), s = src && typeof src === 'object' ? src : {};
+  const d = _wnDefaultInputs(true), s = src && typeof src === 'object' ? src : {};
   const obj = v => (v && typeof v === 'object' && !Array.isArray(v)) ? _deepCopy(v) : {};
   const items = Array.isArray(s.siItems)
     ? s.siItems.filter(i => i && i.id != null).map(i => ({ id:String(i.id), name:String(i.name ?? ''), mm:Number(i.mm) || 0, checked:!!i.checked }))
@@ -220,9 +259,10 @@ function wnValidateHeader(h) {
 // ─── 상태 ───
 const _wn = {
   basis: _wnDefaultBasis(),
+  basisRef: _wnCurrentRef(),   // basis 의 출처(저장 스냅샷 basisRef). 편집 기준에는 넣지 않아 dirty 와 무관
   inputs: _wnDefaultInputs(),
   header: _wnDefaultHeader(),
-  est: null,            // 현재 기록 id (새 산정이면 null)
+  est: null,           // 현재 기록 id (새 산정이면 null)
   baseVersion: 0,       // 편집 기준 버전 (저장 시 충돌 검사)
   viewVersion: null,    // 과거 버전 읽기 전용 보기 중이면 그 번호
   view: null,           // { basis, inputs, header, ver } — viewVersion 의 내용
@@ -246,7 +286,7 @@ function _wnRevert() {
 }
 function _wnNewState() {
   Object.assign(_wn, { est:null, baseVersion:0, viewVersion:null, view:null, restoredFrom:null, pending:null,
-    basis:_wnDefaultBasis(), inputs:_wnDefaultInputs(), header:_wnDefaultHeader() });
+    basis:_wnDefaultBasis(), basisRef:_wnCurrentRef(), inputs:_wnDefaultInputs(), header:_wnDefaultHeader() });
   _wnSetBaseline();
   if (typeof document !== 'undefined') _wnSetBusy(false);
 }
@@ -264,7 +304,7 @@ function _wnSnapshot() {
   header.title = header.title.trim(); header.client = header.client.trim();
   header.participants = header.participants.map(p => ({ ...p, name: p.name.trim(), role: p.role.trim() }));
   header.salesName = _wnSalesName(header.salesId);
-  return _deepCopy({ header, basis: _wn.basis, inputs: _wn.inputs });
+  return _deepCopy({ header, basis: _wn.basis, basisRef: _wnNormalizeRef(_wn.basisRef), inputs: _wn.inputs });
 }
 
 // 외부 노출: 저장 안 된 변경 여부 / 화면 이탈 보호 (switchView 가 사용)
@@ -389,6 +429,21 @@ function renderWisenmView() {
   if (_wn.pending) _wnSetBusy(true);
   _wnSyncPanelMax();
   _wnEnsureLoad();
+  _wnEnsureBasis();
+}
+// 기준표(BasisAPI) 한 번 읽기. 끝나면 편집 중이 아닐 때만(새 산정 빈 판) 새 기준으로 다시 그린다
+function _wnEnsureBasis() {
+  if (_wn._basisTried || typeof BasisAPI === 'undefined' || !BasisAPI || typeof BasisAPI.load !== 'function') return;
+  _wn._basisTried = true;
+  Promise.resolve().then(() => BasisAPI.load()).catch(() => {}).then(() => {
+    if (!_wnOnScreen()) return;
+    const ref = _wnCurrentRef();
+    const fresh = !_wn.dirty && !_wn.est && _wn.viewVersion == null && !_wn.pending && !_wn.saving && !_wnTypingInside();
+    if (fresh && (ref.id !== _wn.basisRef.id || ref.version !== _wn.basisRef.version)) {
+      _wnNewState();
+      _wnKeepFocus(() => { _wnRenderMain(); _wnRenderInfo(); });
+    } else if (!_wn.dirty) _wnKeepFocus(_wnRenderMain);   // 제목·가정·색만 갱신(편집 기준·값은 그대로)
+  });
 }
 
 // 좁은 화면 접이식 패널 열고 닫기 + 토글 버튼 동기화
@@ -654,6 +709,7 @@ function _wnApply(est, ver) {
   _wn.baseVersion = Number(ver.version) || 0;
   _wn.viewVersion = null; _wn.view = null; _wn.restoredFrom = null;
   _wn.basis = _wnNormalizeBasis(snap.basis);
+  _wn.basisRef = _wnNormalizeRef(snap.basisRef);
   _wn.inputs = _wnNormalizeInputs(snap.inputs);
   _wn.header = _wnNormalizeHeader({
     title: pick('title', ''), client: pick('client', ''), salesId: ref('salesId'), projectId: ref('projectId'),
@@ -816,7 +872,7 @@ function _wnTouch() {
 function _wnSheetHtml(basis, I, c, ro) {
   const dis = ro ? ' disabled' : '';
   const roles = basis.roles, vars = basis.vars;
-  const catColor = cat => WN_CAT_COLORS[cat] || WN_VAR_COLOR;
+  const catColor = _wnCatColor;
 
   // 카테고리별 rowspan 계산
   const catSpan = {};
@@ -910,13 +966,18 @@ function _wnSheetHtml(basis, I, c, ro) {
   }).join('');
 
   const total = c.total.toFixed(1);
+  const meta = ((_wnDbBasis() || {}).content || {}).meta || {};
+  const lines = Array.isArray(meta.assumptions) ? meta.assumptions.map(x => String(x ?? '').trim()).filter(Boolean) : [];
+  const assumpHtml = lines.length ? lines.map(_wnE).join(' · ')
+    : `서버 4~5개 단일 컨테이너 구성 · 하드웨어(법인폰 포함) 고객사 직납 · CRM/콜센터 연동 없음 ·
+          <strong>기간 비례:</strong> PM·PL·사업관리 &nbsp;<strong>그 외</strong> 개발·기술·인프라·보안 역할: 기준 M/M + 추가 월 × 0.5 (고정 역할 없음)`;
   return `
     <div class="wn-wrap">
       <div class="wn-topbar">
         <div class="wn-topbar-left">
           <span class="wn-badge">WiseN TM</span>
-          <span class="wn-title">공수 산정 기준표</span>
-          <span class="wn-subtitle">하드웨어 포함 고객사 납품 기준 · 커스터마이징 없음</span>
+          <span class="wn-title">${_wnE(meta.title || '공수 산정 기준표')}</span>
+          <span class="wn-subtitle">${_wnE(meta.subtitle || '하드웨어 포함 고객사 납품 기준 · 커스터마이징 없음')}</span>
         </div>
         <div class="wn-topbar-right">
           <div class="wn-total-kpi">
@@ -962,8 +1023,7 @@ function _wnSheetHtml(basis, I, c, ro) {
 
         <div class="wn-footnote">
           <span class="wn-fn-title">기준 가정</span>
-          서버 4~5개 단일 컨테이너 구성 · 하드웨어(법인폰 포함) 고객사 직납 · CRM/콜센터 연동 없음 ·
-          <strong>기간 비례:</strong> PM·PL·AOS·BE·FE &nbsp;<strong>고정:</strong> TA·인프라·보안
+          ${assumpHtml}
         </div>
       </div>
     </div>`;
@@ -1145,6 +1205,7 @@ function _wnRestore(id, n) {
   if (!ver || !ver.snapshot) { _wnToast('해당 버전 내용을 찾지 못했습니다.'); return; }
   const s = ver.snapshot;
   _wn.basis = _wnNormalizeBasis(s.basis);
+  _wn.basisRef = _wnNormalizeRef(s.basisRef);
   _wn.inputs = _wnNormalizeInputs(s.inputs);
   // 그 사이 삭제된 영업 담당·프로젝트는 연결 해제(저장 시 FK 위반 방지)
   const san = _wnSanitizeRefs(_wnNormalizeHeader(s.header), _wnRefCtx());

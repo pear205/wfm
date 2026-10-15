@@ -254,14 +254,25 @@ function _cleanAuthUrl() {
   history.replaceState(null, '', u.pathname + u.search);
 }
 // 로그인된 계정이 허용 목록(wfm_allowed_users)에 있는지. 조회 오류면 막지 않는다.
-async function _isAllowedUser() {
+// 반환 {allowed, role, personId}. role 컬럼이 없는 구 DB 는 email 만 읽어 role 을 빈 값으로 둔다.
+async function _loadMyAccess(email) {
+  const open = { allowed: true, role: '', personId: null };
   try {
-    const { data, error } = await _sb.from('wfm_allowed_users').select('email').limit(1);
-    if (error) { console.warn('[auth] allowlist check failed', error); return true; }
-    return !!(data && data.length);
+    // admin 은 RLS 상 허용 목록 전체가 보이므로 반드시 **본인 행**만 읽는다(이메일은 DB 에 소문자로 저장됨). 안 그러면 다른 계정의 역할이 잡힌다
+    const me = String(email || '').trim().toLowerCase();
+    let { data, error } = await _sb.from('wfm_allowed_users').select('email,role,person_id').eq('email', me).limit(1);
+    if (error) {
+      // role/person_id 컬럼이 없는 구 DB(42703 등): 허용 여부만 다시 확인
+      ({ data, error } = await _sb.from('wfm_allowed_users').select('email').eq('email', me).limit(1));
+      if (error) { console.warn('[auth] allowlist check failed', error); return open; }
+    }
+    if (!(data && data.length)) return { allowed: false, role: '', personId: null };
+    const r = data[0] || {};
+    const role = ['admin', 'editor', 'viewer'].includes(r.role) ? r.role : '';
+    return { allowed: true, role, personId: r.person_id || null };
   } catch (e) {
     console.warn('[auth] allowlist check failed', e);
-    return true;
+    return open;
   }
 }
 async function _waitForSignIn(ms) {
@@ -329,11 +340,14 @@ async function _checkAuth() {
   const urlError = new URLSearchParams(location.search).get('error_description');
   _cleanAuthUrl();
 
-  if (session && await _isAllowedUser()) {
+  const access = session ? await _loadMyAccess(session.user?.email) : null;
+  if (session && access.allowed) {
     CURRENT_USER.id = session.user?.id || null; CURRENT_USER.email = session.user?.email || '';
+    CURRENT_USER.role = access.role; CURRENT_USER.personId = access.personId;
     overlay.classList.add('hidden');
     logout.hidden = false;
-    logout.title = session.user?.email || '';
+    logout.title = (session.user?.email || '') + (access.role === 'viewer' ? ' · 조회 전용 계정' : '');
+    document.body.classList.toggle('role-viewer', access.role === 'viewer');
     return;
   }
 
@@ -359,6 +373,30 @@ const PRESET_SKILLS = {
   sol:   ['WiseN TM', 'Zendesk', 'Salesforce'],
   etc:   ['Figma', 'Adobe XD', 'Jira', 'Confluence', 'Git', 'Notion'],
 };
+// 공통코드 게터(data.js) 우선, 없으면 위 내장 상수로 폴백
+const _SK_BUILTIN_CATS = [
+  {key:'lang', label:'언어', color:null}, {key:'cloud', label:'클라우드', color:null}, {key:'ai', label:'AI', color:null},
+  {key:'sol', label:'솔루션', color:null}, {key:'etc', label:'기타', color:null},
+];
+const _SK_PANEL_LABEL = {lang:'언어 / 프레임워크', cloud:'클라우드', ai:'AI / ML', sol:'솔루션', etc:'기타'};
+function _skPresets() { try { if (typeof skillPresets === 'function') return skillPresets() || PRESET_SKILLS; } catch (e) {} return PRESET_SKILLS; }
+function _skCats() {
+  try { if (typeof skillCategories === 'function') { const c = skillCategories(); if (Array.isArray(c) && c.length) return c; } } catch (e) {}
+  return _SK_BUILTIN_CATS;
+}
+function _skCatLabel(key) { const c = _skCats().find(x => x.key === key); return c ? c.label : key; }
+function _statusText(key) {
+  try { if (typeof statusLabel === 'function') return statusLabel(key); } catch (e) {}
+  return STATUS_KR[key] || key;
+}
+// 스킬 칩 속성: 내장 5개는 CSS 클래스, 새 분류는 색을 직접 준다. extraStyle 은 고정 문자열만 넣을 것
+function _skChipAttrs(key, extraStyle) {
+  const ex = extraStyle || '';
+  if (_SK_BUILTIN_CATS.some(c => c.key === key)) return `class="sk-tag ${esc(key)}"${ex ? ` style="${ex}"` : ''}`;
+  const c = _skCats().find(x => x.key === key);
+  const col = safeColor(c && c.color);
+  return `class="sk-tag etc" style="${ex}background:${col}22;color:${col}"`;
+}
 
 // ═══════════════════════════════════════════════════════════
 // DATA HELPERS
@@ -946,7 +984,7 @@ function renderProjectPanel(projectId) {
         <div class="pj-name">${esc(pj.name)}</div>
         <div class="pj-client">${esc(pj.client)}</div>
       </div>
-      <span class="pj-status ${safeStatus(pj.status)}">${STATUS_KR[pj.status]||esc(pj.status)}</span>
+      <span class="pj-status ${safeStatus(pj.status)}">${esc(_statusText(pj.status))}</span>
       <button class="panel-edit-btn" data-edit-project="${esc(pj.id)}">✏ 수정</button>
       <button class="panel-assign-btn" data-assign-project="${esc(pj.id)}">+ 멤버 투입</button>
     </div>
@@ -1008,21 +1046,19 @@ function renderMemberPanel(memberId) {
     ${(() => {
       const skills = mem.skills || [];
       if (skills.length === 0) return '';
-      const cats = [
-        {key:'lang',  label:'언어 / 프레임워크'},
-        {key:'cloud', label:'클라우드'},
-        {key:'ai',    label:'AI / ML'},
-        {key:'sol',   label:'솔루션'},
-        {key:'etc',   label:'기타'},
-      ];
+      // 내장 분류 이름이 그대로면 기존 긴 라벨, 관리자가 바꿨거나 새 분류면 코드 라벨
+      const cats = _skCats().map(c => {
+        const b = _SK_BUILTIN_CATS.find(x => x.key === c.key);
+        return { key: c.key, label: (b && b.label === c.label) ? _SK_PANEL_LABEL[c.key] : c.label };
+      });
       let html = '<div class="sk-section"><div class="sk-section-title">스킬</div><div class="sk-cats">';
       cats.forEach(cat => {
         const items = skills.filter(s => s.c === cat.key);
         if (!items.length) return;
-        html += `<div class="sk-cat"><div class="sk-cat-label">${cat.label}</div><div class="sk-tags">`;
+        html += `<div class="sk-cat"><div class="sk-cat-label">${esc(cat.label)}</div><div class="sk-tags">`;
         items.forEach(s => {
           const lvLabel = ['하','중','상'][s.lv-1] || '';
-          html += `<span class="sk-tag ${cat.key}">${esc(s.name)}<span class="sk-lv-label">${lvLabel}</span></span>`;
+          html += `<span ${_skChipAttrs(cat.key)}>${esc(s.name)}<span class="sk-lv-label">${lvLabel}</span></span>`;
         });
         html += '</div></div>';
       });
@@ -1121,11 +1157,16 @@ function _initDragReorder(container, dataKey, reorderFn) {
 }
 
 function renderDrawerContent() {
+  if (typeof _acSyncDrawerTab === 'function') _acSyncDrawerTab();   // 설정 탭은 admin 에게만 보인다(admin-center.js). 먼저 맞춰야 state.mgmtTab 이 정리된다
   const tab = state.mgmtTab;
   const body = document.getElementById('drawerBody');
   document.querySelectorAll('.dtab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
 
-  if (tab === 'sales' && typeof renderSalesAdminDrawer === 'function') {
+  if (tab === 'settings' && typeof renderAdminDrawer === 'function') {
+    document.querySelectorAll('.dtab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'settings'));
+    renderAdminDrawer(body);
+
+  } else if (tab === 'sales' && typeof renderSalesAdminDrawer === 'function') {
     renderSalesAdminDrawer(body);
 
   } else if ((tab === 'boards' || tab === 'templates') && typeof renderBoardAdminDrawer === 'function') {
@@ -1152,7 +1193,7 @@ function renderDrawerContent() {
 
   } else {
     let items = DATA.projects.map(pj => {
-      const s = STATUS_KR[pj.status]||esc(pj.status);
+      const s = esc(_statusText(pj.status));
       return `<div class="mgmt-item" draggable="true" data-drag-id="${esc(pj.id)}">
         <span class="drag-handle" title="순서 변경">⠿</span>
         <div style="width:10px;height:10px;border-radius:50%;background:${safeColor(pj.color)};flex-shrink:0;margin-top:2px"></div>
@@ -1216,11 +1257,7 @@ function openMemberForm(memberId) {
       <div class="sk-form-area">
         <div class="sk-form-row">
           <select class="sk-form-sel" id="skCat">
-            <option value="lang">언어</option>
-            <option value="cloud">클라우드</option>
-            <option value="ai">AI</option>
-            <option value="sol">솔루션</option>
-            <option value="etc">기타</option>
+            ${_skCats().map(c => `<option value="${esc(c.key)}">${esc(c.label)}</option>`).join('')}
           </select>
           <select class="sk-form-sel" id="skName" style="flex:1"></select>
           <input class="sk-form-inp" id="skNameCustom" placeholder="직접 입력" style="display:none;flex:1">
@@ -1240,7 +1277,7 @@ function openMemberForm(memberId) {
   function _renderSkExisting() {
     document.getElementById('skExisting').innerHTML = state._tmpSkills.map((s,i) => {
       const lvLabel = ['하','중','상'][s.lv-1] || '';
-      return `<span class="sk-tag ${esc(s.c)}" style="cursor:default">
+      return `<span ${_skChipAttrs(s.c, 'cursor:default;')}>
         ${esc(s.name)}<span class="sk-lv-label">${lvLabel}</span>
         <span class="sk-rm-btn" data-sk-idx="${i}" style="margin-left:2px;opacity:.6;cursor:pointer">✕</span>
       </span>`;
@@ -1255,7 +1292,7 @@ function openMemberForm(memberId) {
   function _populateSkillSelect(cat) {
     const sel = document.getElementById('skName');
     const custom = document.getElementById('skNameCustom');
-    const presets = (PRESET_SKILLS[cat] || []);
+    const presets = (_skPresets()[cat] || []);
     sel.innerHTML = presets.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('')
       + `<option value="__custom__">직접 입력…</option>`;
     sel.style.display = '';
@@ -2062,10 +2099,9 @@ function _buildSkillDropdown() {
     if (!allSkills[s.c]) allSkills[s.c] = new Set();
     allSkills[s.c].add(s.name);
   }));
-  const catLabel = {lang:'언어', cloud:'클라우드', ai:'AI', sol:'솔루션', etc:'기타'};
   const dd = document.getElementById('benchSkillDropdown');
   dd.innerHTML = Object.entries(allSkills).map(([cat, names]) =>
-    `<div class="skill-filter-group">${catLabel[cat]||cat}</div>` +
+    `<div class="skill-filter-group">${esc(_skCatLabel(cat))}</div>` +
     [...names].map(name =>
       `<label class="skill-filter-item">
         <input type="checkbox" data-skill="${esc(name)}" ${state.benchSkillFilter.includes(name)?'checked':''}>
@@ -2760,7 +2796,7 @@ function mountProjectPicker(host, { id, value, getRange, getMemberId, needsPerio
       let g = null;
       items.forEach((it, i) => {
         const st = PP_STATUS_ORDER.includes(it.p.status) ? it.p.status : 'etc';
-        if (st !== g) { g = st; html += `<div class="pp-group">${esc(STATUS_KR[st] || '기타')}</div>`; }
+        if (st !== g) { g = st; html += `<div class="pp-group">${esc(st === 'etc' ? '기타' : _statusText(st))}</div>`; }
         const sel = it.p.id === hidden.value;
         html += `<div class="pp-item${i === hi ? ' pp-hi' : ''}${sel ? ' pp-sel' : ''}" role="option" aria-selected="${sel}" data-i="${i}" data-id="${esc(it.p.id)}">
           <span class="pp-dot" style="background:${safeColor(it.p.color)}"></span>
@@ -2927,4 +2963,14 @@ function mountProjectPicker(host, { id, value, getRange, getMemberId, needsPerio
   await loadData();
   _initProjFilter();
   render();
+  // 공통코드는 백그라운드로 읽는다. 열린 모달·패널·드로어가 없을 때만 다시 그린다(열려 있으면 다음 렌더에 반영)
+  if (typeof CodeAPI !== 'undefined' && CodeAPI && typeof CodeAPI.load === 'function') {
+    try {
+      const ok = await CodeAPI.load();
+      const busy = Modal._stack.length > 0
+        || document.getElementById('overlay').classList.contains('show')
+        || document.getElementById('mgmtDrawer').classList.contains('open');
+      if (ok && !busy && LOAD.status === 'ok') render();
+    } catch (e) { console.warn('[codes] load failed', e); }
+  }
 })();

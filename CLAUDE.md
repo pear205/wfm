@@ -14,6 +14,7 @@ wfm/
 │   ├── style.css    # 전체 CSS (상단 주석에 디자인 시스템/토큰 설명)
 │   ├── app.js       # UI 로직 (섹션 구분: COMMON / YEAR VIEW / BENCH VIEW)
 │   ├── ops.js       # 운영 도우미(app.js 다음 로드): 삭제 영향 안내, 재직 밖 투입 정리, KPI→점검 목록, 산정 대비 계획, 탭 복귀 시 다시 읽기, 투입 CSV·전체 백업
+│   ├── admin-center.js # 관리 센터(큰 모달): 공통코드 3단 / 공수 산정 기준표 편집·게시 / 사용자·권한. 드로어 "설정" 탭(admin 에게만 보임), `openAdminCenter(tab)`
 │   ├── wisenm.js    # WiseNTM 공수 산정 + 산정 기록(시안 D). 독립 상태 `_wn`, 순수 계산 `wnCompute`, `wnLeaveGuard`
 │   ├── estimate-admin.js # 관리 드로어 "영업 담당" 탭 (`renderSalesAdminDrawer`)
 │   ├── board.js     # 게시판 화면 (목록·검색·합계·상세·댓글·글쓰기, CSV)
@@ -21,6 +22,7 @@ wfm/
 │   └── data.js      # 데이터 레이어 (Supabase CRUD, 조회 상태 `LOAD`, `showToast`, 산정 기록 `EST/ELOAD/EstimateAPI/CURRENT_USER`)
 ├── sql/             # DB 스크립트(사이트에 올라가지 않음): allowlist.sql, boards.sql, estimates.sql
 ├── docs/            # 명세(사이트에 올라가지 않음): board-spec.md, estimate-spec.md
+├── sql/admin.sql    # 역할(admin/editor/viewer)·공통코드·기준표 테이블, 역할 기반 쓰기 RLS, 가드 트리거(적용 완료). 명세: docs/admin-spec.md
 ├── tests/           # `node --test tests/*.test.js` — vm 으로 public/ 의 전역 스크립트를 로드해 계산 고정 테스트
 ├── .github/workflows/pages.yml # push → public/ 만 Pages 배포
 └── HANDOFF.md, CLAUDE.md       # 작업 기록(사이트에 올라가지 않음)
@@ -44,6 +46,8 @@ wfm/
 - `LOAD` (`data.js`): 조회 상태 `loading|ok|error`. 실패/빈 데이터는 `renderDataGate()` 가 표 대신 안내한다.
 - `fetchData()` (`data.js`): 네 테이블을 읽어 `{errors, data}` 반환(DATA 는 안 건드림). `loadData()` 와 백그라운드 새로 고침(`opsRefreshData`)이 공용. `yearVisibleMembers(year)` (`app.js`): 투입 현황 필터 결과 — 표·PNG·CSV·점검 목록이 공용.
 - `showToast(msg)` / `parseMM()` / `isYM()`: 알림과 입력 검증 공용 헬퍼.
+- **역할(권한)**: `CURRENT_USER.role` = `admin|editor|viewer`(로그인 때 본인 행만 읽음, 빈 값=구 DB·제한 없음). `hasRole(min)/canWrite()/isAdmin()`. viewer 는 `SaveState._run` 가드가 쓰기를 막고 `body.role-viewer` CSS 가 수정 컨트롤을 숨긴다. **서버(RLS, `wfm_has_role(min)`)가 최종 방어**이므로 화면 숨김에만 의존하지 않는다. 새 쓰기 테이블을 만들면 정책에 최소 역할을 명시한다.
+- **공통코드/기준표**: 내장 기본값(`PRESET_SKILLS`·`STATUS_KR`·`WISENM_ROLES/VARS`)이 항상 폴백이고, 관리 센터에서 "DB 로 가져오기"를 하면 DB 값이 우선(`CODES/CodeAPI`: `skillPresets()·skillCategories()·statusLabel()`, `BASIS/BasisAPI`: `current()·publish()`). 코드 키는 불변, 기준표는 게시마다 새 버전(불변)·사유 필수, 새 산정만 현재 기준표를 쓰고 저장된 기록은 자기 스냅샷(`basisRef`) 기준을 유지. 사용자 관리는 `UserAPI`(admin).
 - **산정 기록**: `EST`(영업·기록 머리말·버전 캐시) / `ELOAD`(`idle|loading|ok|missing|error`) / `EstimateAPI`(`load, loadVersions, save, copy, remove, canDelete, saveSales…`, 계약은 `docs/estimate-spec.md`). 버전은 불변(insert-only), 동시 저장은 `current_version` 조건부 update 로 감지. 계산은 `wnCompute(basis, inputs)` 한 곳만 쓴다(화면·저장 총공수·이력 공용). 미저장 보호는 `wnLeaveGuard`(`switchView` 가 호출).
 - `SaveState` (`data.js`): 모든 Supabase 쓰기는 `_track(label, key, thunk)` 경유(키별 순차 실행, 최신 작업이 예전 실패 건을 대체, 재시도는 현재 DATA 재조회). 상단 `#saveStatus` 에 저장 중/저장됨/실패+다시 시도·되돌리기. 새 쓰기 경로를 추가할 때 반드시 `_track` 을 쓴다.
 - `Modal.track(id, getState)` / `Modal.requestClose(id)`: 편집 모달의 변경 감지와 닫기 경고(모달 안 확인 바). 사용자 닫기 경로는 `requestClose`, 저장·삭제 후에는 `Modal.close`.
@@ -124,6 +128,7 @@ MgmtView  ── 관리 화면 (멤버·프로젝트 CRUD)
 - [x] 공수 산정 기록(버전 이력·복원·복제·영업 담당·참여자·프로젝트 연결)
 - [x] 운영 도우미(ops.js): 삭제 영향 안내, 재직 밖 투입 정리, KPI→점검 목록, 산정 대비 계획, 다른 PC 변경 반영, 투입 CSV·전체 백업
 - [x] 계산 고정 테스트(tests/, node --test)
+- [x] 관리 센터(사용자·권한 3단계 역할, 공수 산정 기준표 버전 관리, 공통코드), 역할 기반 RLS
 
 ## 진행 상황 · 결정 · 백로그
 > **`HANDOFF.md` 를 먼저 읽을 것.** 집/회사 PC 가 달라 로컬 기억이 공유되지 않으므로, 대기 중인 결정·백로그·합의 사항·작업 이력은 `HANDOFF.md` 한 곳에만 기록한다. 작업을 끝낼 때 갱신하고 커밋·푸시한다.
